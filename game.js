@@ -4,6 +4,7 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
 import { createPlayerPawn } from './playerPawn.js';
 import { createShipPawn } from './shipPawn.js';
+import { SpectatorPawn } from './spectatorPawn.js'; // Import SpectatorPawn
 // --- GLOBAL OCEAN MESH ---
 let globalOcean = null;
 let globalOceanGeometry = null;
@@ -161,6 +162,7 @@ const phiSensitivityInput = document.getElementById('phiSensitivity');
 let isInstructionsVisible = true;
 let isGamePaused = false;
 let isSettingsOpen = false;
+let isSpectatorMode = false; // Add spectator mode state
 
 // Global functions for menu controls
 window.resumeGame = function() {
@@ -186,6 +188,8 @@ function loadSettings() {
     if (savedTheta) thetaSensitivityInput.value = savedTheta;
     if (savedPhi) phiSensitivityInput.value = savedPhi;
 }
+
+let spectatorPawn = null; // Declare spectatorPawn variable
 
 function initGame() {
     const scene = new THREE.Scene();
@@ -369,8 +373,17 @@ function initGame() {
 
     document.addEventListener('mousemove', (e) => {
         if (isPointerLocked) {
-            mouseX = e.movementX || e.mozMovementX || 0;
-            mouseY = e.movementY || e.mozMovementY || 0;
+            const movementX = e.movementX || e.mozMovementX || 0;
+            const movementY = e.movementY || e.mozMovementY || 0;
+            
+            if (isSpectatorMode) {
+                // Pass mouse movement to spectator pawn
+                spectatorPawn.handleMouseMovement(movementX, movementY);
+            } else {
+                // Regular camera mouse input
+                mouseX = movementX;
+                mouseY = movementY;
+            }
         }
     });
 
@@ -418,8 +431,8 @@ function initGame() {
             menu.style.display = isSettingsOpen ? 'block' : 'none';
         }
         
-        // Movement controls only when not paused
-        if (!isGamePaused && !isSettingsOpen) {
+        // Movement controls only when not paused, not in settings, and not in spectator mode
+        if (!isGamePaused && !isSettingsOpen && !isSpectatorMode) {
             if (key === 'w') moveState.forward = true;
             if (key === 's') moveState.backward = true;
             if (key === 'a') moveState.left = true;
@@ -429,10 +442,13 @@ function initGame() {
 
     document.addEventListener('keyup', (e) => {
         const key = e.key.toLowerCase();
-        if (key === 'w') moveState.forward = false;
-        if (key === 's') moveState.backward = false;
-        if (key === 'a') moveState.left = false;
-        if (key === 'd') moveState.right = false;
+        // Only process movement key releases if not in spectator mode
+        if (!isSpectatorMode) {
+            if (key === 'w') moveState.forward = false;
+            if (key === 's') moveState.backward = false;
+            if (key === 'a') moveState.left = false;
+            if (key === 'd') moveState.right = false;
+        }
     });
 
     closeMenuButton.addEventListener('click', () => {
@@ -442,6 +458,42 @@ function initGame() {
             canvas.requestPointerLock();
         }
     });
+
+    // Initialize SpectatorPawn
+    spectatorPawn = new SpectatorPawn(scene, camera);
+
+    // Add keybinding for F8 with capture phase
+    window.addEventListener('keydown', (event) => {
+        if (event.code === 'F8') {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleSpectatorMode();
+        }
+    }, true); // Use capture phase
+
+    function toggleSpectatorMode() {
+        const spectatorIndicator = document.getElementById('spectatorIndicator');
+        
+        if (isSpectatorMode) {
+            // Deactivate spectator mode
+            spectatorPawn.deactivate();
+            isSpectatorMode = false;
+            spectatorIndicator.style.display = 'none';
+            console.log('[Game] Spectator mode deactivated');
+        } else {
+            // Activate spectator mode
+            // Clear all movement states to stop the ship
+            moveState.forward = false;
+            moveState.backward = false;
+            moveState.left = false;
+            moveState.right = false;
+            
+            spectatorPawn.activate();
+            isSpectatorMode = true;
+            spectatorIndicator.style.display = 'block';
+            console.log('[Game] Spectator mode activated');
+        }
+    }
 
     // Animation loop
     function animate(currentTime) {
@@ -471,8 +523,8 @@ function initGame() {
                 // Ship movement handled by processInput
             }
             
-            // Process ship input if available
-            if (playerPawn.processInput) {
+            // Process ship input if available and not in spectator mode
+            if (playerPawn.processInput && !isSpectatorMode) {
                 playerPawn.processInput();
             }
 
@@ -509,7 +561,9 @@ function initGame() {
                 y += Math.sin(0.07 * (px + pz) + t * 0.3) * 0.7 * getLocalWaveMultiplier(px, pz);
                 // Ship handles its own Y position and ocean bobbing
             }
-            playerPawn.update(deltaTime, animationTime);
+            if (!isSpectatorMode) {
+                playerPawn.update(deltaTime, animationTime);
+            }
 
             // --- Animate global ocean mesh (ripple effect) ---
             if (globalOcean && globalOceanGeometry && playerPawn) {
@@ -793,8 +847,8 @@ function initGame() {
                 console.warn('[Game] terrainGenerator not available or missing methods');
             }
 
-            // Update camera based on mouse movement
-            if (isPointerLocked && (mouseX !== 0 || mouseY !== 0)) {
+            // Update camera based on mouse movement (only if not in spectator mode)
+            if (isPointerLocked && (mouseX !== 0 || mouseY !== 0) && !isSpectatorMode) {
                 theta -= mouseX * thetaSensitivity;
                 phi -= mouseY * phiSensitivity;
                 phi = Math.max(0.1, Math.min(1.2, phi));
@@ -803,12 +857,20 @@ function initGame() {
                 mouseY = 0;
             }
 
-            // Update camera position
-            const horizontalDistance = r * Math.cos(phi);
-            camera.position.x = playerPawn.position.x + horizontalDistance * Math.sin(theta);
-            camera.position.z = playerPawn.position.z + horizontalDistance * Math.cos(theta);
-            camera.position.y = playerPawn.position.y + r * Math.sin(phi);
-            camera.lookAt(playerPawn.position);
+            // Update camera position (only if not in spectator mode)
+            if (!isSpectatorMode) {
+                const horizontalDistance = r * Math.cos(phi);
+                camera.position.x = playerPawn.position.x + horizontalDistance * Math.sin(theta);
+                camera.position.z = playerPawn.position.z + horizontalDistance * Math.cos(theta);
+                camera.position.y = playerPawn.position.y + r * Math.sin(phi);
+                camera.lookAt(playerPawn.position);
+            }
+        }
+
+        // Update spectator pawn if in spectator mode (outside pause check)
+        if (isSpectatorMode) {
+            console.log('[Game] Updating spectator with deltaTime:', deltaTime);
+            spectatorPawn.update(deltaTime);
         }
 
         renderer.render(scene, camera);

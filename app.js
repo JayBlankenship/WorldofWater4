@@ -2,6 +2,8 @@
 // This file now acts as the main application controller,
 // coordinating between the Network module, PauseUI module, and Game
 
+import { SpectatorPawn } from './spectatorPawn.js';
+
 // Legacy global variables for compatibility (reference Network object)
 let myPeerId = null;
 let peer = null;
@@ -10,6 +12,10 @@ let paired = false;
 let partnerPeerId = null;
 let partnerConn = null;
 let isInitialized = false;
+
+// Spectator mode variables
+let spectatorPawn = null;
+let isSpectatorMode = false;
 
 // Initialize all modules when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -32,6 +38,16 @@ function initializeApp() {
   // Start networking
   Network.init();
   Network.startAutoReconnect();
+  
+  // Initialize SpectatorPawn
+  spectatorPawn = new SpectatorPawn(scene, camera);
+
+  // Add keybinding for F8
+  window.addEventListener('keydown', (event) => {
+      if (event.code === 'F8') {
+          toggleSpectatorMode();
+      }
+  });
   
   // Update legacy variables for compatibility
   updateLegacyVariables();
@@ -72,6 +88,30 @@ function updateChainLinks() {
 window.sendMessage = sendMessage;
 window.joinChain = joinChain;
 window.broadcastChain = broadcastChain;
+
+// Toggle spectator mode
+function toggleSpectatorMode() {
+  if (isSpectatorMode) {
+      // Deactivate spectator mode
+      spectatorPawn.deactivate();
+      isSpectatorMode = false;
+      console.log('Spectator mode deactivated');
+  } else {
+      // Activate spectator mode
+      spectatorPawn.activate();
+      isSpectatorMode = true;
+      console.log('Spectator mode activated');
+  }
+}
+
+// Update loop
+function update(deltaTime) {
+  if (isSpectatorMode) {
+      spectatorPawn.update(deltaTime);
+  } else {
+      // ...existing update logic...
+  }
+}
 
 // Start the application
 initializeApp();
