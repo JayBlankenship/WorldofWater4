@@ -73,38 +73,66 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
     // Create procedural ship geometry as fallback
     console.log('Creating ship with Ship1.glb model and procedural fallback');
     
-    // Create temporary placeholder while loading
-    const placeholderGeometry = new THREE.BoxGeometry(2, 0.5, 4);
-    const placeholderMaterial = new THREE.MeshLambertMaterial({ 
-        color: shipColor,
-        wireframe: true,
-        transparent: true,
-        opacity: 0.3
-    });
-    const placeholder = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
-    placeholder.position.y = 0; // Position on water surface
-    playerGroup.add(placeholder);
+    // Skip placeholder creation - load GLTF directly
     
     // For networked players, immediately create a simple ship without trying to load GLTF
     if (color === 0xFF0000) { // If this is a networked player (red color)
         console.log('Creating simple ship for networked player');
         console.log('Color check passed:', color, '=== 0xFF0000:', color === 0xFF0000);
-        // Remove placeholder immediately
-        playerGroup.remove(placeholder);
         
-        // Create simple ship geometry instead of trying to load GLTF
-        const simpleShipGeometry = new THREE.BoxGeometry(3, 1, 6);
-        const simpleShipMaterial = new THREE.MeshLambertMaterial({ 
-            color: shipColor,
-            emissive: new THREE.Color(shipColor),
-            emissiveIntensity: 0.1
-        });
-        const simpleShip = new THREE.Mesh(simpleShipGeometry, simpleShipMaterial);
-        simpleShip.position.y = 0;
-        playerGroup.add(simpleShip);
-        playerGroup.shipModel = simpleShip;
+        // Skip creating the simple red box - networked players will use the GLTF model instead
+        console.log('Skipping simple ship creation for networked player - will use GLTF model');
         
-        console.log('Simple ship created and added to playerGroup');
+        // Try to load Ship1.glb for networked players too
+        const loader = new GLTFLoader();
+        loader.load(
+        './Ship1.glb',
+        (gltf) => {
+            console.log('Ship1.glb loaded successfully for networked player');
+            const shipModel = gltf.scene;
+            
+            // Configure and add the GLTF ship
+            shipModel.scale.setScalar(1.0);
+            shipModel.position.y = 0;
+            
+            // Apply color tint to ship materials
+            shipModel.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    child.material = child.material.clone();
+                    const colorVector = new THREE.Color(shipColor);
+                    if (child.material.color) {
+                        child.material.color.lerp(colorVector, 0.2);
+                    }
+                    if (child.material.emissive) {
+                        child.material.emissive.copy(colorVector);
+                        child.material.emissiveIntensity = 0.1;
+                    }
+                }
+            });
+            
+            playerGroup.add(shipModel);
+            playerGroup.shipModel = shipModel;
+            console.log('Ship1.glb added to networked player group');
+        },
+        (progress) => {
+            console.log('Loading Ship1.glb progress for networked player:', (progress.loaded / progress.total) * 100 + '%');
+        },
+        (error) => {
+            console.error('Error loading Ship1.glb for networked player:', error);
+            // If GLTF fails, create a simple non-red placeholder
+            const simpleShipGeometry = new THREE.BoxGeometry(3, 1, 6);
+            const simpleShipMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x888888, // Gray instead of red
+                emissive: new THREE.Color(0x888888),
+                emissiveIntensity: 0.1
+            });
+            const simpleShip = new THREE.Mesh(simpleShipGeometry, simpleShipMaterial);
+            simpleShip.position.y = 0;
+            playerGroup.add(simpleShip);
+            playerGroup.shipModel = simpleShip;
+            console.log('Gray fallback ship created for networked player');
+        }
+        );
     } else {
         console.log('Not a networked player, using GLTF loader. Color:', color);
         // Try to load Ship1.glb for local and AI players
@@ -114,9 +142,6 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
         (gltf) => {
             console.log('Ship1.glb loaded successfully');
             const shipModel = gltf.scene;
-            
-            // Remove placeholder
-            playerGroup.remove(placeholder);
             
             // Configure and add the GLTF ship
             shipModel.scale.setScalar(1.0); // Adjust scale as needed
@@ -153,9 +178,6 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
         (error) => {
             console.error('Error loading Ship1.glb:', error);
             console.log('Using procedural ship geometry fallback');
-            
-            // Remove placeholder and create procedural ship
-            playerGroup.remove(placeholder);
             
             // Create the procedural ship hull
             const shipGeometry = createFallbackShipGeometry();
@@ -198,7 +220,7 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
     let pitchAmplitude = 0.03 + Math.random() * 0.02;
 
     // Add properties for game mechanics
-    playerGroup.position.set(0, 20, 0); // Start at water level (ocean surface is at y=20)
+    playerGroup.position.set(0, 21.5, 0); // Start at water level (ocean surface is at y=20) + ship float height
     playerGroup.velocity = new THREE.Vector3();
     playerGroup.angularVelocity = 0;
     playerGroup.targetRotationY = 0;
@@ -209,35 +231,80 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
     playerGroup.angularDeceleration = 0.88;
     playerGroup.isAI = isAI;
 
-    // Enhanced update function for ship movement on ocean
-    playerGroup.update = function(deltaTime) {
-        // Calculate the actual ocean surface height at the ship's position
-        const oceanSurfaceY = calculateOceanHeight(this.position.x, this.position.z);
+    // Simplified update function for ship movement independent of ocean waves
+    playerGroup.update = function(deltaTime, animationTime, sailSpeed, moveState, camera) {
+        // Keep ship at a fixed height above the base ocean level
+        // The ship now traverses across the water surface independently of waves
+        const baseOceanHeight = 20.0; // Base ocean surface height 
+        const shipFloatHeight = 1.5; // How high above the water the ship sits
         
-        // Attach ship directly to the ocean surface
-        this.position.y = oceanSurfaceY;
+        // Add a visual indicator when ship should be moving
+        let movingIndicator = 0;
+        if (sailSpeed && sailSpeed > 0) {
+            movingIndicator = Math.sin(animationTime * 4) * 0.3; // Bounce when moving
+        }
         
-        // Apply rolling and pitching to ship model based on local wave slope
+        this.position.y = baseOceanHeight + shipFloatHeight + movingIndicator;
+        
+        // Always add subtle ship movement effects for realism (even during spectator mode)
         if (this.shipModel) {
-            // Calculate wave slope for realistic ship tilting
-            const sampleDistance = 2.0; // Sample points around ship for slope calculation
-            const heightFront = calculateOceanHeight(this.position.x, this.position.z + sampleDistance);
-            const heightBack = calculateOceanHeight(this.position.x, this.position.z - sampleDistance);
-            const heightLeft = calculateOceanHeight(this.position.x - sampleDistance, this.position.z);
-            const heightRight = calculateOceanHeight(this.position.x + sampleDistance, this.position.z);
-            
-            // Calculate pitch (front-back tilt) and roll (left-right tilt)
-            const pitch = Math.atan2(heightFront - heightBack, sampleDistance * 2) * 0.5; // Reduce intensity
-            const roll = Math.atan2(heightRight - heightLeft, sampleDistance * 2) * 0.5;
-            
-            // Apply natural ship motion based on wave slopes
-            this.shipModel.rotation.x = pitch;
-            this.shipModel.rotation.z = roll;
-            
-            // Add subtle additional bobbing for ship feel
+            // Add gentle bobbing motion for ship feel
             const time = Date.now() * 0.001;
-            const bobOffset = Math.sin(time * 0.8) * 0.1;
+            const bobOffset = Math.sin(time * 0.8) * 0.2;
+            const rollOffset = Math.sin(time * 1.2) * 0.05;
+            
+            // Apply subtle bobbing and rolling
             this.shipModel.position.y = bobOffset;
+            this.shipModel.rotation.z = rollOffset;
+            this.shipModel.rotation.x = Math.sin(time * 0.6) * 0.03; // Gentle pitch
+        }
+        
+        // Handle movement based on sail mode and controls (only if parameters are provided)
+        if (sailSpeed !== undefined && moveState && camera) {
+            const isAutoSailing = !moveState.left && !moveState.right && !moveState.backward && sailSpeed > 0;
+            
+            if (isAutoSailing) {
+                console.log(`[Ship] Auto-sailing mode - sailSpeed: ${sailSpeed} (ship continues moving with sails)`);
+            } else {
+                console.log(`[Ship] Manual control mode - sailSpeed: ${sailSpeed}, moveState:`, moveState);
+            }
+            
+            // Get forward direction from ship's Y rotation (fixed for correct forward direction)
+            const rotationY = this.rotation.y;
+            let direction = new THREE.Vector3(
+                Math.sin(rotationY),   // X component
+                0,                     // Y component (horizontal movement)
+                -Math.cos(rotationY)   // Z component (NEGATIVE for forward in Three.js)
+            );
+            direction.normalize();
+
+            console.log(`[Ship] Forward direction:`, direction.x.toFixed(3), direction.z.toFixed(3), 'rotation.y:', rotationY.toFixed(3));
+
+            // Ship movement - automatic forward movement based on sail mode (works in both normal and spectator mode)
+            if (sailSpeed > 0) {
+                const movement = direction.clone().multiplyScalar(sailSpeed * deltaTime);
+                this.position.add(movement);
+                console.log(`[Ship] Moving forward at sail speed ${sailSpeed}, movement:`, movement.x.toFixed(3), movement.z.toFixed(3), 'new position:', this.position.x.toFixed(2), this.position.z.toFixed(2));
+            }
+
+            // Manual steering with A/D keys (only in normal mode, not spectator mode)
+            if (moveState.left) {
+                // Turn left - rotate the ship
+                this.rotation.y += 1.0 * deltaTime;
+                console.log(`[Ship] Turning left, rotation.y:`, this.rotation.y.toFixed(3));
+            }
+            if (moveState.right) {
+                // Turn right - rotate the ship
+                this.rotation.y -= 1.0 * deltaTime;
+                console.log(`[Ship] Turning right, rotation.y:`, this.rotation.y.toFixed(3));
+            }
+
+            // Manual reverse with S key (only when pressed in normal mode)
+            if (moveState.backward) {
+                const reverseMovement = direction.clone().multiplyScalar(-sailSpeed * 0.5 * deltaTime);
+                this.position.add(reverseMovement);
+                console.log(`[Ship] Moving backward`);
+            }
         }
         
         // Update angular velocity towards target
@@ -252,62 +319,13 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
         // Update velocity
         this.velocity.multiplyScalar(this.deceleration);
         
-        // Apply velocity to position (but Y will be overridden by ocean surface)
-        this.position.add(this.velocity.clone().multiplyScalar(deltaTime));
-        
-        // Recalculate ocean surface height after movement and reattach
-        const newOceanSurfaceY = calculateOceanHeight(this.position.x, this.position.z);
-        this.position.y = newOceanSurfaceY;
-        
-        // Clamp position to reasonable bounds
+        // Don't override position changes from movement logic above
+        // Just clamp position to reasonable bounds
         this.position.x = Math.max(-2000, Math.min(2000, this.position.x));
         this.position.z = Math.max(-2000, Math.min(2000, this.position.z));
     };
 
-    // Add keyboard controls for human players
-    if (!isAI) {
-        const keys = {};
-        
-        window.addEventListener('keydown', (event) => {
-            keys[event.code] = true;
-        });
-        
-        window.addEventListener('keyup', (event) => {
-            keys[event.code] = false;
-        });
-        
-        playerGroup.processInput = function() {
-            const moveVector = new THREE.Vector3();
-            
-            if (keys['KeyW'] || keys['ArrowUp']) {
-                moveVector.z -= 1;
-            }
-            if (keys['KeyS'] || keys['ArrowDown']) {
-                moveVector.z += 1;
-            }
-            if (keys['KeyA'] || keys['ArrowLeft']) {
-                this.targetRotationY += this.rotationSpeed * 2;
-            }
-            if (keys['KeyD'] || keys['ArrowRight']) {
-                this.targetRotationY -= this.rotationSpeed * 2;
-            }
-            
-            if (moveVector.length() > 0) {
-                moveVector.normalize();
-                moveVector.multiplyScalar(this.acceleration);
-                
-                // Apply rotation to movement vector
-                moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.rotation.y);
-                
-                this.velocity.add(moveVector);
-                
-                // Clamp velocity
-                if (this.velocity.length() > this.maxSpeed) {
-                    this.velocity.normalize().multiplyScalar(this.maxSpeed);
-                }
-            }
-        };
-    }
+    // Removed old keyboard controls - now using sail-based movement system from game.js
 
     return playerGroup;
 }
@@ -479,16 +497,4 @@ function addShipDetails(shipGroup, shipColor) {
     bowsprit.rotation.x = Math.PI / 6; // Angle upward
     bowsprit.position.set(0, 1.2, 3.5);
     shipGroup.add(bowsprit);
-    
-    // Ship flags with player color
-    const flagGeometry = new THREE.PlaneGeometry(0.5, 0.3);
-    const flagMaterial = new THREE.MeshLambertMaterial({ 
-        color: shipColor,
-        side: THREE.DoubleSide,
-        emissive: new THREE.Color(shipColor),
-        emissiveIntensity: 0.3
-    });
-    const flag = new THREE.Mesh(flagGeometry, flagMaterial);
-    flag.position.set(0, 4.5, 0);
-    shipGroup.add(flag);
 }

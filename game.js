@@ -433,10 +433,29 @@ function initGame() {
         
         // Movement controls only when not paused, not in settings, and not in spectator mode
         if (!isGamePaused && !isSettingsOpen && !isSpectatorMode) {
-            if (key === 'w') moveState.forward = true;
-            if (key === 's') moveState.backward = true;
-            if (key === 'a') moveState.left = true;
-            if (key === 'd') moveState.right = true;
+            if (key === 'w') {
+                // W key increases sail mode
+                console.log(`[Game] W key pressed, current sail mode: ${currentSailMode}`);
+                toggleSailMode('w');
+            }
+            if (key === 's') {
+                // S key can decrease sail mode OR provide manual reverse
+                console.log(`[Game] S key pressed, current sail mode: ${currentSailMode}`);
+                if (currentSailMode === 'noSail') {
+                    moveState.backward = true; // Manual reverse when no sail
+                    console.log(`[Game] S key triggering manual reverse`);
+                } else {
+                    toggleSailMode('s'); // Decrease sail mode
+                }
+            }
+            if (key === 'a') {
+                moveState.left = true;
+                console.log(`[Game] A key pressed - turning left`);
+            }
+            if (key === 'd') {
+                moveState.right = true;
+                console.log(`[Game] D key pressed - turning right`);
+            }
         }
     });
 
@@ -444,10 +463,18 @@ function initGame() {
         const key = e.key.toLowerCase();
         // Only process movement key releases if not in spectator mode
         if (!isSpectatorMode) {
-            if (key === 'w') moveState.forward = false;
-            if (key === 's') moveState.backward = false;
-            if (key === 'a') moveState.left = false;
-            if (key === 'd') moveState.right = false;
+            if (key === 's') {
+                moveState.backward = false; // Stop manual reverse
+                console.log(`[Game] S key released - stopping manual reverse`);
+            }
+            if (key === 'a') {
+                moveState.left = false;
+                console.log(`[Game] A key released - stopping left turn`);
+            }
+            if (key === 'd') {
+                moveState.right = false;
+                console.log(`[Game] D key released - stopping right turn`);
+            }
         }
     });
 
@@ -495,6 +522,47 @@ function initGame() {
         }
     }
 
+    // Add sailing speeds logic
+    const sailModes = {
+        noSail: 0,
+        partSail: 2,
+        halfSail: 4,
+        fullSail: 6
+    };
+    let currentSailMode = 'noSail';
+
+    // Add UI element to display current sail mode
+    const sailModeDisplay = document.createElement('div');
+    sailModeDisplay.id = 'sailModeDisplay';
+    sailModeDisplay.style.position = 'absolute';
+    sailModeDisplay.style.bottom = '10px';
+    sailModeDisplay.style.left = '10px';
+    sailModeDisplay.style.padding = '10px';
+    sailModeDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    sailModeDisplay.style.color = 'white';
+    sailModeDisplay.style.fontSize = '16px';
+    sailModeDisplay.style.borderRadius = '5px';
+    sailModeDisplay.style.zIndex = '1000';
+    sailModeDisplay.textContent = `Sail Mode: ${currentSailMode}`;
+    document.body.appendChild(sailModeDisplay);
+
+    // Update toggleSailMode to handle 'w' for increase and 's' for decrease
+    // Ship now moves independently based on sail mode, not tied to key states
+    function toggleSailMode(key) {
+        const sailModeKeys = Object.keys(sailModes);
+        const currentIndex = sailModeKeys.indexOf(currentSailMode);
+
+        if (key === 'w') {
+            currentSailMode = sailModeKeys[(currentIndex + 1) % sailModeKeys.length];
+        } else if (key === 's') {
+            currentSailMode = sailModeKeys[(currentIndex - 1 + sailModeKeys.length) % sailModeKeys.length];
+        }
+
+        const sailSpeed = sailModes[currentSailMode];
+        console.log(`[Game] Sail mode changed to: ${currentSailMode} (speed: ${sailSpeed})`);
+        sailModeDisplay.textContent = `Sail Mode: ${currentSailMode} (Speed: ${sailSpeed})`;
+    }
+
     // Animation loop
     function animate(currentTime) {
         requestAnimationFrame(animate);
@@ -503,368 +571,333 @@ function initGame() {
         lastTime = currentTime;
         animationTime += deltaTime;
 
-        // Update player position only if not paused
+        // Always update the ship for visual effects (bouncing, bobbing)
+        // Ship should continue moving based on sail mode even in spectator mode (sails keep working!)
         if (!isGamePaused && !isSettingsOpen) {
-            let direction = new THREE.Vector3();
-            camera.getWorldDirection(direction);
-            direction.y = 0;
-            direction.normalize();
-
-            if (moveState.forward) {
-                // Ship movement handled by processInput
-            }
-            if (moveState.backward) {
-                // Ship movement handled by processInput
-            }
-            if (moveState.left) {
-                // Ship movement handled by processInput
-            }
-            if (moveState.right) {
-                // Ship movement handled by processInput
+            // Movement logic is now handled in playerPawn.update()
+            const sailSpeed = sailModes[currentSailMode];
+            
+            // Debug: Log every 60 frames (approximately once per second)
+            if (Math.floor(animationTime * 60) % 60 === 0) {
+                console.log(`[Game] Animation frame - sailSpeed: ${sailSpeed}, ship position:`, 
+                    playerPawn.position.x.toFixed(2), playerPawn.position.y.toFixed(2), playerPawn.position.z.toFixed(2));
+                console.log(`[Game] Move state:`, moveState);
+                console.log(`[Game] Game paused: ${isGamePaused}, Settings open: ${isSettingsOpen}, Spectator: ${isSpectatorMode}`);
             }
             
-            // Process ship input if available and not in spectator mode
-            if (playerPawn.processInput && !isSpectatorMode) {
-                playerPawn.processInput();
-            }
-
-            // Update player pawn and star animations
-            // --- Make player pawn float on the true animated ocean surface (including storms) ---
-            if (globalOcean && globalOceanGeometry && playerPawn) {
-                // Use the exact same logic as the mesh for perfect sync
-                function getLocalWaveMultiplier(x, z) {
-                    let localAmp = 1.0;
-                    let swirlY = 0;
-                    if (globalOceanWaveState.storms) {
-                        for (let storm of globalOceanWaveState.storms) {
-                            const dx = x - storm.x;
-                            const dz = z - storm.z;
-                            const dist = Math.sqrt(dx * dx + dz * dz);
-                            if (dist < storm.radius) {
-                                swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
-                                localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
-                            }
-                        }
-                    }
-                    const dist = Math.sqrt(x * x + z * z);
-                    let base = 1.0;
-                    if (dist < 30) base = 0.7;
-                    if (dist > 80) base = 1.5;
-                    return base * localAmp + swirlY;
-                }
-                let t = globalOceanTime;
-                let px = playerPawn.position.x;
-                let pz = playerPawn.position.z;
-                let y = 0;
-                y += Math.sin(0.09 * px + t * 0.7) * 1.2 * getLocalWaveMultiplier(px, pz);
-                y += Math.cos(0.08 * pz + t * 0.5) * 1.0 * getLocalWaveMultiplier(px, pz);
-                y += Math.sin(0.07 * (px + pz) + t * 0.3) * 0.7 * getLocalWaveMultiplier(px, pz);
-                // Ship handles its own Y position and ocean bobbing
-            }
             if (!isSpectatorMode) {
-                playerPawn.update(deltaTime, animationTime);
+                // Normal mode: pass sail speed, move state, and camera for full control
+                playerPawn.update(deltaTime, animationTime, sailSpeed, moveState, camera);
+            } else {
+                // Spectator mode: ship continues sailing based on sail mode, but no manual controls
+                // Create empty move state so ship only moves based on sail speed, not key presses
+                const autoMoveState = { left: false, right: false, backward: false };
+                playerPawn.update(deltaTime, animationTime, sailSpeed, autoMoveState, camera);
             }
+        } else {
+            // Update ship visual effects only when paused or settings open
+            playerPawn.update(deltaTime, animationTime);
+        }
 
-            // --- Animate global ocean mesh (ripple effect) ---
-            if (globalOcean && globalOceanGeometry && playerPawn) {
-                // --- Storm system: storms can form, move, and swirl toward the player ---
-                // Update storms
-                if (!globalOceanWaveState.storms) globalOceanWaveState.storms = [];
-                // More frequent storm spawning with higher intensity
-                if (Math.random() < deltaTime * 0.08 && globalOceanWaveState.storms.length < globalOceanWaveState.maxStorms) {
-                    // Storms spawn closer and more frequently
-                    const angle = Math.random() * Math.PI * 2;
-                    const dist = 800 + Math.random() * 1500; // Closer storms
-                    globalOceanWaveState.storms.push({
-                        x: playerPawn.position.x + Math.cos(angle) * dist,
-                        z: playerPawn.position.z + Math.sin(angle) * dist,
-                        amp: 3 + Math.random() * 5, // Much more intense waves (was 2-5, now 3-8)
-                        radius: 600 + Math.random() * 800, // Larger storm radius
-                        swirl: Math.random() * Math.PI * 2,
-                        swirlSpeed: 0.2 + Math.random() * 0.4, // Faster swirling
-                        moveSpeed: 4 + Math.random() * 6, // Faster moving storms
-                        target: { x: playerPawn.position.x, z: playerPawn.position.z },
-                        age: 0,
-                        intensity: 0.7 + Math.random() * 0.3 // Storm color intensity
-                    });
+        // --- Animate global ocean mesh (ripple effect) ---
+        if (globalOcean && globalOceanGeometry && playerPawn) {
+            // --- Storm system: storms can form, move, and swirl toward the player ---
+            // Update storms
+            if (!globalOceanWaveState.storms) globalOceanWaveState.storms = [];
+            // More frequent storm spawning with higher intensity
+            if (Math.random() < deltaTime * 0.08 && globalOceanWaveState.storms.length < globalOceanWaveState.maxStorms) {
+                // Storms spawn closer and more frequently
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 800 + Math.random() * 1500; // Closer storms
+                globalOceanWaveState.storms.push({
+                    x: playerPawn.position.x + Math.cos(angle) * dist,
+                    z: playerPawn.position.z + Math.sin(angle) * dist,
+                    amp: 3 + Math.random() * 5, // Much more intense waves (was 2-5, now 3-8)
+                    radius: 600 + Math.random() * 800, // Larger storm radius
+                    swirl: Math.random() * Math.PI * 2,
+                    swirlSpeed: 0.2 + Math.random() * 0.4, // Faster swirling
+                    moveSpeed: 4 + Math.random() * 6, // Faster moving storms
+                    target: { x: playerPawn.position.x, z: playerPawn.position.z },
+                    age: 0,
+                    intensity: 0.7 + Math.random() * 0.3 // Storm color intensity
+                });
+            }
+            // Move storms toward the player, swirl them
+            for (let storm of globalOceanWaveState.storms) {
+                // Swirl around their center
+                storm.swirl += storm.swirlSpeed * deltaTime;
+                // Move toward player
+                const dx = playerPawn.position.x - storm.x;
+                const dz = playerPawn.position.z - storm.z;
+                const d = Math.sqrt(dx * dx + dz * dz);
+                if (d > 10) {
+                    storm.x += (dx / d) * storm.moveSpeed * deltaTime;
+                    storm.z += (dz / d) * storm.moveSpeed * deltaTime;
                 }
-                // Move storms toward the player, swirl them
+                storm.age += deltaTime;
+            }
+            // Remove old storms
+            globalOceanWaveState.storms = globalOceanWaveState.storms.filter(s => s.age < 80);
+
+            // Bipolar ocean: smoothly interpolate between extreme and chill states
+            globalOceanWaveState.timer -= deltaTime;
+            if (globalOceanWaveState.timer <= 0) {
+                // More extreme weather patterns
+                if (Math.random() < 0.6) { // 60% chance for storms vs 40% calm
+                    // Extreme storm: very high amp and speed
+                    globalOceanWaveState.targetAmp = 2.0 + Math.random() * 2.5; // Much more intense (was 1.2-1.9)
+                    globalOceanWaveState.targetSpeed = 3.5 + Math.random() * 2.0; // Faster waves
+                    globalOceanWaveState.targetStormIntensity = 0.8 + Math.random() * 0.2; // High storm intensity
+                } else {
+                    // Brief calm: low amp and speed (shorter duration)
+                    globalOceanWaveState.targetAmp = 0.3 + Math.random() * 0.4;
+                    globalOceanWaveState.targetSpeed = 1.0 + Math.random() * 0.8;
+                    globalOceanWaveState.targetStormIntensity = 0.1 + Math.random() * 0.2; // Low storm intensity
+                }
+                globalOceanWaveState.timer = 6 + Math.random() * 6; // Shorter cycles for more dynamic weather
+            }
+            // Very gradual interpolation for ultra-smooth, realistic weather transitions
+            globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.02;
+            globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.02;
+            globalOceanWaveState.stormIntensity += (globalOceanWaveState.targetStormIntensity - globalOceanWaveState.stormIntensity) * deltaTime * 0.015;
+            // Center ocean on player
+            globalOcean.position.x = playerPawn.position.x;
+            globalOcean.position.z = playerPawn.position.z;
+            globalOcean.position.y = 20.0; // Match the mesh creation position
+            globalOceanTime += deltaTime * globalOceanWaveState.speed;
+            
+            // Update window variables for ship synchronization
+            window.globalOceanTime = globalOceanTime;
+            window.globalOceanWaveState = globalOceanWaveState;
+            
+            const pos = globalOceanGeometry.attributes.position;
+            const seg = globalOceanSegments;
+            let t = globalOceanTime;
+            let px = playerPawn.position.x;
+            let pz = playerPawn.position.z;
+            let size = globalOceanSize;
+            function getLocalWaveMultiplier(x, z) {
+                // Storms: if inside a storm, use its amp
+                let localAmp = 1.0;
+                let swirlY = 0;
                 for (let storm of globalOceanWaveState.storms) {
-                    // Swirl around their center
-                    storm.swirl += storm.swirlSpeed * deltaTime;
-                    // Move toward player
-                    const dx = playerPawn.position.x - storm.x;
-                    const dz = playerPawn.position.z - storm.z;
-                    const d = Math.sqrt(dx * dx + dz * dz);
-                    if (d > 10) {
-                        storm.x += (dx / d) * storm.moveSpeed * deltaTime;
-                        storm.z += (dz / d) * storm.moveSpeed * deltaTime;
+                    const dx = x - storm.x;
+                    const dz = z - storm.z;
+                    const dist = Math.sqrt(dx * dx + dz * dz);
+                    if (dist < storm.radius) {
+                        // Smoother, more natural swirl
+                        swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
+                        localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
                     }
-                    storm.age += deltaTime;
                 }
-                // Remove old storms
-                globalOceanWaveState.storms = globalOceanWaveState.storms.filter(s => s.age < 80);
+                // Example: Calm in center, wilder at edges
+                const dist = Math.sqrt(x * x + z * z);
+                let base = 1.0;
+                if (dist < 30) base = 0.7;
+                if (dist > 80) base = 1.5;
+                return base * localAmp + swirlY;
+            }
+            for (let xi = 0; xi <= seg; xi++) {
+                for (let zi = 0; zi <= seg; zi++) {
+                    const idx = xi * (seg + 1) + zi;
+                    const x = (xi - seg / 2) * (size / seg) + px;
+                    const z = (zi - seg / 2) * (size / seg) + pz;
+                    // Use local multiplier for mesh
+                    let amp = globalOceanWaveState.amp;
+                    let y = 0;
+                    // Add storm/localized effect
+                    y += Math.sin(0.09 * x + t * 0.7) * 1.2 * getLocalWaveMultiplier(x, z);
+                    y += Math.cos(0.08 * z + t * 0.5) * 1.0 * getLocalWaveMultiplier(x, z);
+                    y += Math.sin(0.07 * (x + z) + t * 0.3) * 0.7 * getLocalWaveMultiplier(x, z);
+                    pos.setY(idx, y);
+                    
+                    // Skip dynamic color updates to prevent visibility issues
+                    // The static depth colors set during creation are sufficient
+                }
+            }
+            pos.needsUpdate = true;
+            // Skip color updates to prevent rendering issues
+            globalOceanGeometry.computeVertexNormals();
+        }
+        // Broadcast our position to other players as soon as we have any connections
+        const hasAnyPeers = window.Network && window.Network.getLobbyPeerIds && window.Network.getLobbyPeerIds().length > 0;
+        const isInitialized = window.Network && window.Network.isInitialized;
+        
+        // Enhanced debugging for host broadcasting
+        if (window.Network && window.Network.isBase) {
+            // Detailed host debugging every 1 second instead of every frame
+            if (!window.lastHostDebug || Date.now() - window.lastHostDebug > 1000) {
+                console.log(`[Game-Host] Broadcasting status check:`);
+                console.log(`  - hasAnyPeers: ${hasAnyPeers}`);
+                console.log(`  - isInitialized: ${isInitialized}`);
+                console.log(`  - peerCount: ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0}`);
+                console.log(`  - lobbyConnectedPeers: [${window.Network.lobbyConnectedPeers?.join(', ') || 'N/A'}]`);
+                console.log(`  - lobbyPeerConnections: ${Object.keys(window.Network.lobbyPeerConnections || {}).length} connections`);
+                console.log(`  - isBase: ${window.Network.isBase}, paired: ${window.Network.paired}, lobbyFull: ${window.Network.lobbyFull}`);
+                window.lastHostDebug = Date.now();
+            }
+        }
+        
+        // More robust broadcasting condition - try to broadcast if we have network AND either peers or connections
+        const shouldBroadcast = window.Network && isInitialized && (
+            hasAnyPeers || 
+            (window.Network.isBase && window.Network.lobbyPeerConnections && Object.keys(window.Network.lobbyPeerConnections).length > 0) ||
+            (!window.Network.isBase && window.Network.hostConn && window.Network.hostConn.open)
+        );
+        
+        if (shouldBroadcast) {
+            // Create player state object
+            const playerState = {
+                position: {
+                    x: playerPawn.position.x,
+                    y: playerPawn.position.y,
+                    z: playerPawn.position.z
+                },
+                rotation: {
+                    x: playerPawn.rotation.x,
+                    y: playerPawn.rotation.y,
+                    z: playerPawn.rotation.z
+                },
+                surgeActive: playerPawn.surgeActive || false
+            };
+            
+            // Throttle network updates to avoid spam (send every ~100ms)
+            const now = Date.now();
+            if (!window.lastNetworkUpdate || now - window.lastNetworkUpdate > 100) {
+                if (window.Network && window.Network.isBase) {
+                    console.log(`[Game-Host] Broadcasting player state to ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0} peers:`, playerState);
+                }
+                
+                try {
+                    window.Network.broadcastPlayerState(playerState);
+                    window.lastNetworkUpdate = now;
+                } catch (error) {
+                    console.error(`[Game] Error broadcasting player state:`, error);
+                }
+            }
+        } else if (window.Network && window.Network.isBase) {
+            // Debug why host isn't broadcasting
+            if (!window.lastNoBroadcastDebug || Date.now() - window.lastNoBroadcastDebug > 2000) {
+                console.warn(`[Game-Host] NOT broadcasting because:`);
+                console.warn(`  - hasAnyPeers: ${hasAnyPeers}`);
+                console.warn(`  - isInitialized: ${isInitialized}`);
+                console.warn(`  - lobbyPeerConnections count: ${window.Network.lobbyPeerConnections ? Object.keys(window.Network.lobbyPeerConnections).length : 'N/A'}`);
+                window.lastNoBroadcastDebug = Date.now();
+            }
+        }
 
-                // Bipolar ocean: smoothly interpolate between extreme and chill states
-                globalOceanWaveState.timer -= deltaTime;
-                if (globalOceanWaveState.timer <= 0) {
-                    // More extreme weather patterns
-                    if (Math.random() < 0.6) { // 60% chance for storms vs 40% calm
-                        // Extreme storm: very high amp and speed
-                        globalOceanWaveState.targetAmp = 2.0 + Math.random() * 2.5; // Much more intense (was 1.2-1.9)
-                        globalOceanWaveState.targetSpeed = 3.5 + Math.random() * 2.0; // Faster waves
-                        globalOceanWaveState.targetStormIntensity = 0.8 + Math.random() * 0.2; // High storm intensity
-                    } else {
-                        // Brief calm: low amp and speed (shorter duration)
-                        globalOceanWaveState.targetAmp = 0.3 + Math.random() * 0.4;
-                        globalOceanWaveState.targetSpeed = 1.0 + Math.random() * 0.8;
-                        globalOceanWaveState.targetStormIntensity = 0.1 + Math.random() * 0.2; // Low storm intensity
-                    }
-                    globalOceanWaveState.timer = 6 + Math.random() * 6; // Shorter cycles for more dynamic weather
-                }
-                // Very gradual interpolation for ultra-smooth, realistic weather transitions
-                globalOceanWaveState.amp += (globalOceanWaveState.targetAmp - globalOceanWaveState.amp) * deltaTime * 0.02;
-                globalOceanWaveState.speed += (globalOceanWaveState.targetSpeed - globalOceanWaveState.speed) * deltaTime * 0.02;
-                globalOceanWaveState.stormIntensity += (globalOceanWaveState.targetStormIntensity - globalOceanWaveState.stormIntensity) * deltaTime * 0.015;
-                // Center ocean on player
-                globalOcean.position.x = playerPawn.position.x;
-                globalOcean.position.z = playerPawn.position.z;
-                globalOcean.position.y = 20.0; // Match the mesh creation position
-                globalOceanTime += deltaTime * globalOceanWaveState.speed;
+        // Update red networked players (animate them smoothly)
+        networkedPlayerManager.update(deltaTime, animationTime);
+
+        // Update global player position for exclusion zone logic
+        window.playerPosition = playerPawn.position.clone();
+
+        // Update terrain storm system
+        if (terrainGenerator && typeof terrainGenerator.updateStormSystem === 'function') {
+            terrainGenerator.updateStormSystem(deltaTime, playerPawn.position);
+        }
+
+        // Dynamically update terrain tiles with storm effects every frame
+        if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
+            window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()), terrainGenerator);
+        }
+
+        // Broadcast terrain changes to other players if we're in a complete lobby
+        if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby() && terrainGenerator && typeof terrainGenerator.getTerrainChanges === 'function') {
+            try {
+                // Get terrain changes from this frame
+                const terrainChanges = terrainGenerator.getTerrainChanges();
                 
-                // Update window variables for ship synchronization
-                window.globalOceanTime = globalOceanTime;
-                window.globalOceanWaveState = globalOceanWaveState;
-                
-                const pos = globalOceanGeometry.attributes.position;
-                const seg = globalOceanSegments;
-                let t = globalOceanTime;
-                let px = playerPawn.position.x;
-                let pz = playerPawn.position.z;
-                let size = globalOceanSize;
-                function getLocalWaveMultiplier(x, z) {
-                    // Storms: if inside a storm, use its amp
-                    let localAmp = 1.0;
-                    let swirlY = 0;
-                    for (let storm of globalOceanWaveState.storms) {
-                        const dx = x - storm.x;
-                        const dz = z - storm.z;
-                        const dist = Math.sqrt(dx * dx + dz * dz);
-                        if (dist < storm.radius) {
-                            // Smoother, more natural swirl
-                            swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
-                            localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
-                        }
-                    }
-                    // Example: Calm in center, wilder at edges
-                    const dist = Math.sqrt(x * x + z * z);
-                    let base = 1.0;
-                    if (dist < 30) base = 0.7;
-                    if (dist > 80) base = 1.5;
-                    return base * localAmp + swirlY;
-                }
-                for (let xi = 0; xi <= seg; xi++) {
-                    for (let zi = 0; zi <= seg; zi++) {
-                        const idx = xi * (seg + 1) + zi;
-                        const x = (xi - seg / 2) * (size / seg) + px;
-                        const z = (zi - seg / 2) * (size / seg) + pz;
-                        // Use local multiplier for mesh
-                        let amp = globalOceanWaveState.amp;
-                        let y = 0;
-                        // Add storm/localized effect
-                        y += Math.sin(0.09 * x + t * 0.7) * 1.2 * getLocalWaveMultiplier(x, z);
-                        y += Math.cos(0.08 * z + t * 0.5) * 1.0 * getLocalWaveMultiplier(x, z);
-                        y += Math.sin(0.07 * (x + z) + t * 0.3) * 0.7 * getLocalWaveMultiplier(x, z);
-                        pos.setY(idx, y);
+                // Only broadcast if there are actual changes and throttle to prevent spam
+                if (terrainChanges && (terrainChanges.newPlanes.length > 0 || terrainChanges.removedPlanes.length > 0)) {
+                    // Throttle terrain broadcasts to prevent network spam (every 500ms for safety)
+                    const now = Date.now();
+                    if (!window.lastTerrainUpdate || now - window.lastTerrainUpdate > 500) {
+                        // Limit the number of changes per broadcast
+                        const maxChangesPerUpdate = 10;
+                        const limitedChanges = {
+                            newPlanes: terrainChanges.newPlanes.slice(0, maxChangesPerUpdate),
+                            removedPlanes: terrainChanges.removedPlanes.slice(0, maxChangesPerUpdate)
+                        };
                         
-                        // Skip dynamic color updates to prevent visibility issues
-                        // The static depth colors set during creation are sufficient
+                        console.log(`[Game] Broadcasting terrain changes:`, limitedChanges);
+                        window.Network.broadcastTerrainChanges(limitedChanges);
+                        window.lastTerrainUpdate = now;
                     }
                 }
-                pos.needsUpdate = true;
-                // Skip color updates to prevent rendering issues
-                globalOceanGeometry.computeVertexNormals();
+            } catch (error) {
+                console.error('[Game] Error during terrain broadcasting:', error);
             }
-            // Broadcast our position to other players as soon as we have any connections
-            const hasAnyPeers = window.Network && window.Network.getLobbyPeerIds && window.Network.getLobbyPeerIds().length > 0;
-            const isInitialized = window.Network && window.Network.isInitialized;
-            
-            // Enhanced debugging for host broadcasting
-            if (window.Network && window.Network.isBase) {
-                // Detailed host debugging every 1 second instead of every frame
-                if (!window.lastHostDebug || Date.now() - window.lastHostDebug > 1000) {
-                    console.log(`[Game-Host] Broadcasting status check:`);
-                    console.log(`  - hasAnyPeers: ${hasAnyPeers}`);
-                    console.log(`  - isInitialized: ${isInitialized}`);
-                    console.log(`  - peerCount: ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0}`);
-                    console.log(`  - lobbyConnectedPeers: [${window.Network.lobbyConnectedPeers?.join(', ') || 'N/A'}]`);
-                    console.log(`  - lobbyPeerConnections: ${Object.keys(window.Network.lobbyPeerConnections || {}).length} connections`);
-                    console.log(`  - isBase: ${window.Network.isBase}, paired: ${window.Network.paired}, lobbyFull: ${window.Network.lobbyFull}`);
-                    window.lastHostDebug = Date.now();
-                }
-            }
-            
-            // More robust broadcasting condition - try to broadcast if we have network AND either peers or connections
-            const shouldBroadcast = window.Network && isInitialized && (
-                hasAnyPeers || 
-                (window.Network.isBase && window.Network.lobbyPeerConnections && Object.keys(window.Network.lobbyPeerConnections).length > 0) ||
-                (!window.Network.isBase && window.Network.hostConn && window.Network.hostConn.open)
-            );
-            
-            if (shouldBroadcast) {
-                // Create player state object
-                const playerState = {
-                    position: {
-                        x: playerPawn.position.x,
-                        y: playerPawn.position.y,
-                        z: playerPawn.position.z
-                    },
-                    rotation: {
-                        x: playerPawn.rotation.x,
-                        y: playerPawn.rotation.y,
-                        z: playerPawn.rotation.z
-                    },
-                    surgeActive: playerPawn.surgeActive || false
-                };
-                
-                // Throttle network updates to avoid spam (send every ~100ms)
-                const now = Date.now();
-                if (!window.lastNetworkUpdate || now - window.lastNetworkUpdate > 100) {
-                    if (window.Network && window.Network.isBase) {
-                        console.log(`[Game-Host] Broadcasting player state to ${window.Network.getLobbyPeerIds ? window.Network.getLobbyPeerIds().length : 0} peers:`, playerState);
-                    }
-                    
-                    try {
-                        window.Network.broadcastPlayerState(playerState);
-                        window.lastNetworkUpdate = now;
-                    } catch (error) {
-                        console.error(`[Game] Error broadcasting player state:`, error);
-                    }
-                }
-            } else if (window.Network && window.Network.isBase) {
-                // Debug why host isn't broadcasting
-                if (!window.lastNoBroadcastDebug || Date.now() - window.lastNoBroadcastDebug > 2000) {
-                    console.warn(`[Game-Host] NOT broadcasting because:`);
-                    console.warn(`  - hasAnyPeers: ${hasAnyPeers}`);
-                    console.warn(`  - isInitialized: ${isInitialized}`);
-                    console.warn(`  - lobbyPeerConnections count: ${window.Network.lobbyPeerConnections ? Object.keys(window.Network.lobbyPeerConnections).length : 'N/A'}`);
-                    window.lastNoBroadcastDebug = Date.now();
-                }
-            }
+        }
 
-            // Update red networked players (animate them smoothly)
-            networkedPlayerManager.update(deltaTime, animationTime);
-
-            // Update global player position for exclusion zone logic
-            window.playerPosition = playerPawn.position.clone();
-
-            // Update terrain storm system
-            if (terrainGenerator && typeof terrainGenerator.updateStormSystem === 'function') {
-                terrainGenerator.updateStormSystem(deltaTime, playerPawn.position);
-            }
-
-            // Dynamically update terrain tiles with storm effects every frame
-            if (terrainGenerator && terrainGenerator.planes && typeof window.updateExclusionZoneEveryFrame === 'function') {
-                window.updateExclusionZoneEveryFrame(Array.from(terrainGenerator.planes.values()), terrainGenerator);
-            }
-
-            // Broadcast terrain changes to other players if we're in a complete lobby
-            if (window.Network && window.Network.isInCompleteLobby && window.Network.isInCompleteLobby() && terrainGenerator && typeof terrainGenerator.getTerrainChanges === 'function') {
-                try {
-                    // Get terrain changes from this frame
-                    const terrainChanges = terrainGenerator.getTerrainChanges();
-                    
-                    // Only broadcast if there are actual changes and throttle to prevent spam
-                    if (terrainChanges && (terrainChanges.newPlanes.length > 0 || terrainChanges.removedPlanes.length > 0)) {
-                        // Throttle terrain broadcasts to prevent network spam (every 500ms for safety)
-                        const now = Date.now();
-                        if (!window.lastTerrainUpdate || now - window.lastTerrainUpdate > 500) {
-                            // Limit the number of changes per broadcast
-                            const maxChangesPerUpdate = 10;
-                            const limitedChanges = {
-                                newPlanes: terrainChanges.newPlanes.slice(0, maxChangesPerUpdate),
-                                removedPlanes: terrainChanges.removedPlanes.slice(0, maxChangesPerUpdate)
-                            };
-                            
-                            console.log(`[Game] Broadcasting terrain changes:`, limitedChanges);
-                            window.Network.broadcastTerrainChanges(limitedChanges);
-                            window.lastTerrainUpdate = now;
-                        }
-                    }
-                } catch (error) {
-                    console.error('[Game] Error during terrain broadcasting:', error);
-                }
-            }
-
-            // Update all AI players
-            aiPlayers.forEach(aiPlayer => {
-                aiPlayer.updateAI(deltaTime, animationTime);
-                // Generate planes around each AI (with safety check)
-                if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
-                    terrainGenerator.generateNeighboringPlanes(aiPlayer.position);
-                }
-            });
-
-            // Generate new planes for both player and AI
+        // Update all AI players
+        aiPlayers.forEach(aiPlayer => {
+            aiPlayer.updateAI(deltaTime, animationTime);
+            // Generate planes around each AI (with safety check)
             if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
-                terrainGenerator.generateNeighboringPlanes(playerPawn.position);
-                
-                // Generate terrain around red networked players too
-                try {
-                    const networkedPlayerPositions = networkedPlayerManager.getAllPositions();
-                    if (networkedPlayerPositions.length > 0 && networkedPlayerPositions.length < 10) { // Safety limit
-                        networkedPlayerPositions.forEach(position => {
-                            if (position && position.x !== undefined && position.z !== undefined) {
-                                terrainGenerator.generateNeighboringPlanes(position);
-                            }
-                        });
+                terrainGenerator.generateNeighboringPlanes(aiPlayer.position);
+            }
+        });
 
-                        // Remove distant planes (check distance to player, AIs, and networked players)
-                        // Create a combined array of all entities for distance checking
-                        const allEntities = [...aiPlayers];
-                        networkedPlayerPositions.forEach(pos => {
-                            if (pos && pos.x !== undefined && pos.z !== undefined) {
-                                allEntities.push({ position: pos });
-                            }
-                        });
-                        if (typeof terrainGenerator.removeDistantPlanes === 'function') {
-                            terrainGenerator.removeDistantPlanes(playerPawn.position, allEntities);
+        // Generate new planes for both player and AI
+        if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
+            terrainGenerator.generateNeighboringPlanes(playerPawn.position);
+            
+            // Generate terrain around red networked players too
+            try {
+                const networkedPlayerPositions = networkedPlayerManager.getAllPositions();
+                if (networkedPlayerPositions.length > 0 && networkedPlayerPositions.length < 10) { // Safety limit
+                    networkedPlayerPositions.forEach(position => {
+                        if (position && position.x !== undefined && position.z !== undefined) {
+                            terrainGenerator.generateNeighboringPlanes(position);
                         }
-                    } else {
-                        // Fallback to just player and AI if networked players seem invalid
-                        if (typeof terrainGenerator.removeDistantPlanes === 'function') {
-                            terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
+                    });
+
+                    // Remove distant planes (check distance to player, AIs, and networked players)
+                    // Create a combined array of all entities for distance checking
+                    const allEntities = [...aiPlayers];
+                    networkedPlayerPositions.forEach(pos => {
+                        if (pos && pos.x !== undefined && pos.z !== undefined) {
+                            allEntities.push({ position: pos });
                         }
+                    });
+                    if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                        terrainGenerator.removeDistantPlanes(playerPawn.position, allEntities);
                     }
-                } catch (error) {
-                    console.error('[Game] Error with networked player terrain:', error);
-                    // Fallback to just player and AI terrain
+                } else {
+                    // Fallback to just player and AI if networked players seem invalid
                     if (typeof terrainGenerator.removeDistantPlanes === 'function') {
                         terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
                     }
                 }
-            } else {
-                console.warn('[Game] terrainGenerator not available or missing methods');
+            } catch (error) {
+                console.error('[Game] Error with networked player terrain:', error);
+                // Fallback to just player and AI terrain
+                if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                    terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
+                }
             }
+        } else {
+            console.warn('[Game] terrainGenerator not available or missing methods');
+        }
 
-            // Update camera based on mouse movement (only if not in spectator mode)
-            if (isPointerLocked && (mouseX !== 0 || mouseY !== 0) && !isSpectatorMode) {
-                theta -= mouseX * thetaSensitivity;
-                phi -= mouseY * phiSensitivity;
-                phi = Math.max(0.1, Math.min(1.2, phi));
-                theta = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-                mouseX = 0;
-                mouseY = 0;
-            }
+        // Update camera based on mouse movement (only if not in spectator mode)
+        if (isPointerLocked && (mouseX !== 0 || mouseY !== 0) && !isSpectatorMode) {
+            theta -= mouseX * thetaSensitivity;
+            phi -= mouseY * phiSensitivity;
+            phi = Math.max(0.1, Math.min(1.2, phi));
+            theta = ((theta % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            mouseX = 0;
+            mouseY = 0;
+        }
 
-            // Update camera position (only if not in spectator mode)
-            if (!isSpectatorMode) {
-                const horizontalDistance = r * Math.cos(phi);
-                camera.position.x = playerPawn.position.x + horizontalDistance * Math.sin(theta);
-                camera.position.z = playerPawn.position.z + horizontalDistance * Math.cos(theta);
-                camera.position.y = playerPawn.position.y + r * Math.sin(phi);
-                camera.lookAt(playerPawn.position);
-            }
+        // Update camera position (only if not in spectator mode)
+        if (!isSpectatorMode) {
+            const horizontalDistance = r * Math.cos(phi);
+            camera.position.x = playerPawn.position.x + horizontalDistance * Math.sin(theta);
+            camera.position.z = playerPawn.position.z + horizontalDistance * Math.cos(theta);
+            camera.position.y = playerPawn.position.y + r * Math.sin(phi);
+            camera.lookAt(playerPawn.position);
         }
 
         // Update spectator pawn if in spectator mode (outside pause check)
