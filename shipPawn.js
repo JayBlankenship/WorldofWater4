@@ -222,14 +222,13 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
     // Add properties for game mechanics
     playerGroup.position.set(0, 21.5, 0); // Start at water level (ocean surface is at y=20) + ship float height
     playerGroup.velocity = new THREE.Vector3();
-    playerGroup.angularVelocity = 0;
-    playerGroup.targetRotationY = 0;
     playerGroup.maxSpeed = 8;
     playerGroup.acceleration = 0.15;
     playerGroup.deceleration = 0.92;
-    playerGroup.rotationSpeed = 0.035;
-    playerGroup.angularDeceleration = 0.88;
     playerGroup.isAI = isAI;
+    
+    // Create a forward direction vector that stays with the ship
+    playerGroup.forwardVector = new THREE.Vector3(0, 0, -1); // Forward is negative Z in Three.js
 
     // Simplified update function for ship movement independent of ocean waves
     playerGroup.update = function(deltaTime, animationTime, sailSpeed, moveState, camera) {
@@ -295,52 +294,40 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
                 console.log(`[Ship] Manual control mode - sailSpeed: ${sailSpeed}, moveState:`, moveState);
             }
             
-            // Get forward direction from ship's Y rotation (fixed for correct forward direction)
-            const rotationY = this.rotation.y;
-            let direction = new THREE.Vector3(
-                Math.sin(rotationY),   // X component
-                0,                     // Y component (horizontal movement)
-                -Math.cos(rotationY)   // Z component (NEGATIVE for forward in Three.js)
-            );
-            direction.normalize();
+            // Use the ship's forward vector that automatically rotates with the ship
+            const worldForward = this.forwardVector.clone().applyQuaternion(this.quaternion);
+            worldForward.normalize();
 
-            console.log(`[Ship] Forward direction:`, direction.x.toFixed(3), direction.z.toFixed(3), 'rotation.y:', rotationY.toFixed(3));
+            console.log(`[Ship] Forward direction:`, worldForward.x.toFixed(3), worldForward.z.toFixed(3), 'rotation.y:', this.rotation.y.toFixed(3));
 
-            // Ship movement - automatic forward movement based on sail mode (works in both normal and spectator mode)
+            // Ship movement - automatic forward movement based on sail mode
             if (sailSpeed > 0) {
-                const movement = direction.clone().multiplyScalar(sailSpeed * deltaTime);
+                const movement = worldForward.clone().multiplyScalar(sailSpeed * deltaTime);
                 this.position.add(movement);
                 console.log(`[Ship] Moving forward at sail speed ${sailSpeed}, movement:`, movement.x.toFixed(3), movement.z.toFixed(3), 'new position:', this.position.x.toFixed(2), this.position.z.toFixed(2));
             }
 
-            // Manual steering with A/D keys (only in normal mode, not spectator mode)
+            // New simple turning mechanics with better rotation speed
+            const turnSpeed = 2.0; // Increased turn speed for responsive control
             if (moveState.left) {
-                // Turn left - rotate the ship
-                this.rotation.y += 1.0 * deltaTime;
+                // Turn left with consistent speed
+                this.rotation.y += turnSpeed * deltaTime;
                 console.log(`[Ship] Turning left, rotation.y:`, this.rotation.y.toFixed(3));
             }
             if (moveState.right) {
-                // Turn right - rotate the ship
-                this.rotation.y -= 1.0 * deltaTime;
+                // Turn right with consistent speed
+                this.rotation.y -= turnSpeed * deltaTime;
                 console.log(`[Ship] Turning right, rotation.y:`, this.rotation.y.toFixed(3));
             }
 
             // Manual reverse with S key (only when pressed in normal mode)
             if (moveState.backward) {
-                const reverseMovement = direction.clone().multiplyScalar(-sailSpeed * 0.5 * deltaTime);
+                const reverseMovement = worldForward.clone().multiplyScalar(-sailSpeed * 0.5 * deltaTime);
                 this.position.add(reverseMovement);
                 console.log(`[Ship] Moving backward`);
             }
+
         }
-        
-        // Update angular velocity towards target
-        const angleDiff = this.targetRotationY - this.rotation.y;
-        const normalizedAngleDiff = ((angleDiff + Math.PI) % (Math.PI * 2)) - Math.PI;
-        this.angularVelocity += normalizedAngleDiff * this.rotationSpeed;
-        this.angularVelocity *= this.angularDeceleration;
-        
-        // Apply rotation
-        this.rotation.y += this.angularVelocity;
         
         // Update velocity
         this.velocity.multiplyScalar(this.deceleration);
