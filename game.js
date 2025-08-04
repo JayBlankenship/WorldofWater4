@@ -839,43 +839,14 @@ function initGame() {
             }
         });
 
-        // Generate new planes for both player and AI
+        // Generate new planes ONLY for local player and AI - NOT for networked players (replicants)
         if (terrainGenerator && typeof terrainGenerator.generateNeighboringPlanes === 'function') {
+            // Generate terrain around local player (host)
             terrainGenerator.generateNeighboringPlanes(playerPawn.position);
             
-            // Generate terrain around red networked players too
-            try {
-                const networkedPlayerPositions = networkedPlayerManager.getAllPositions();
-                if (networkedPlayerPositions.length > 0 && networkedPlayerPositions.length < 10) { // Safety limit
-                    networkedPlayerPositions.forEach(position => {
-                        if (position && position.x !== undefined && position.z !== undefined) {
-                            terrainGenerator.generateNeighboringPlanes(position);
-                        }
-                    });
-
-                    // Remove distant planes (check distance to player, AIs, and networked players)
-                    // Create a combined array of all entities for distance checking
-                    const allEntities = [...aiPlayers];
-                    networkedPlayerPositions.forEach(pos => {
-                        if (pos && pos.x !== undefined && pos.z !== undefined) {
-                            allEntities.push({ position: pos });
-                        }
-                    });
-                    if (typeof terrainGenerator.removeDistantPlanes === 'function') {
-                        terrainGenerator.removeDistantPlanes(playerPawn.position, allEntities);
-                    }
-                } else {
-                    // Fallback to just player and AI if networked players seem invalid
-                    if (typeof terrainGenerator.removeDistantPlanes === 'function') {
-                        terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
-                    }
-                }
-            } catch (error) {
-                console.error('[Game] Error with networked player terrain:', error);
-                // Fallback to just player and AI terrain
-                if (typeof terrainGenerator.removeDistantPlanes === 'function') {
-                    terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
-                }
+            // Only remove distant planes based on local player and AIs - NOT networked players
+            if (typeof terrainGenerator.removeDistantPlanes === 'function') {
+                terrainGenerator.removeDistantPlanes(playerPawn.position, aiPlayers);
             }
         } else {
             console.warn('[Game] terrainGenerator not available or missing methods');
