@@ -233,30 +233,56 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
 
     // Simplified update function for ship movement independent of ocean waves
     playerGroup.update = function(deltaTime, animationTime, sailSpeed, moveState, camera) {
-        // Keep ship at a fixed height above the base ocean level
-        // The ship now traverses across the water surface independently of waves
-        const baseOceanHeight = 20.0; // Base ocean surface height 
-        const shipFloatHeight = 1.5; // How high above the water the ship sits
+        // Calculate the actual ocean surface height at the ship's position
+        const oceanHeight = calculateOceanHeight(this.position.x, this.position.z);
+        const shipFloatHeight = 0.5; // Reduced - more hull in water for realistic look
         
         // Add a visual indicator when ship should be moving
         let movingIndicator = 0;
         if (sailSpeed && sailSpeed > 0) {
-            movingIndicator = Math.sin(animationTime * 4) * 0.3; // Bounce when moving
+            movingIndicator = Math.sin(animationTime * 4) * 0.2; // Reduced bounce
         }
         
-        this.position.y = baseOceanHeight + shipFloatHeight + movingIndicator;
+        // Ship follows the actual ocean surface (including waves and storms)
+        this.position.y = oceanHeight + shipFloatHeight + movingIndicator;
+        
+        // Calculate ocean surface slopes for realistic ship orientation
+        const sampleDistance = 2.0; // Distance to sample for slope calculation
+        
+        // Sample ocean heights around the ship to calculate surface normal
+        const frontHeight = calculateOceanHeight(
+            this.position.x + Math.sin(this.rotation.y) * sampleDistance,
+            this.position.z - Math.cos(this.rotation.y) * sampleDistance
+        );
+        const backHeight = calculateOceanHeight(
+            this.position.x - Math.sin(this.rotation.y) * sampleDistance,
+            this.position.z + Math.cos(this.rotation.y) * sampleDistance
+        );
+        const leftHeight = calculateOceanHeight(
+            this.position.x - Math.cos(this.rotation.y) * sampleDistance,
+            this.position.z - Math.sin(this.rotation.y) * sampleDistance
+        );
+        const rightHeight = calculateOceanHeight(
+            this.position.x + Math.cos(this.rotation.y) * sampleDistance,
+            this.position.z + Math.sin(this.rotation.y) * sampleDistance
+        );
+        
+        // Calculate pitch (front-back tilt) and roll (left-right tilt)
+        const pitch = Math.atan2(frontHeight - backHeight, sampleDistance * 2) * 0.8; // Reduce intensity
+        const roll = Math.atan2(rightHeight - leftHeight, sampleDistance * 2) * 0.8;
         
         // Always add subtle ship movement effects for realism (even during spectator mode)
         if (this.shipModel) {
-            // Add gentle bobbing motion for ship feel
+            // Apply ocean-based rotation with some additional bobbing
             const time = Date.now() * 0.001;
-            const bobOffset = Math.sin(time * 0.8) * 0.2;
-            const rollOffset = Math.sin(time * 1.2) * 0.05;
+            const bobOffset = Math.sin(time * 0.8) * 0.1; // Reduced bobbing since we have wave following
+            const additionalRoll = Math.sin(time * 1.2) * 0.02; // Subtle additional movement
+            const additionalPitch = Math.sin(time * 0.6) * 0.01;
             
-            // Apply subtle bobbing and rolling
+            // Apply ocean-calculated rotations plus subtle additional movement
             this.shipModel.position.y = bobOffset;
-            this.shipModel.rotation.z = rollOffset;
-            this.shipModel.rotation.x = Math.sin(time * 0.6) * 0.03; // Gentle pitch
+            this.shipModel.rotation.z = roll + additionalRoll; // Roll based on ocean + subtle extra
+            this.shipModel.rotation.x = pitch + additionalPitch; // Pitch based on ocean + subtle extra
         }
         
         // Handle movement based on sail mode and controls (only if parameters are provided)

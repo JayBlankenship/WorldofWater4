@@ -2,8 +2,6 @@
 // This file now acts as the main application controller,
 // coordinating between the Network module, PauseUI module, and Game
 
-import { SpectatorPawn } from './spectatorPawn.js';
-
 // Legacy global variables for compatibility (reference Network object)
 let myPeerId = null;
 let peer = null;
@@ -12,10 +10,6 @@ let paired = false;
 let partnerPeerId = null;
 let partnerConn = null;
 let isInitialized = false;
-
-// Spectator mode variables
-let spectatorPawn = null;
-let isSpectatorMode = false;
 
 // Initialize all modules when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
@@ -39,16 +33,6 @@ function initializeApp() {
   Network.init();
   Network.startAutoReconnect();
   
-  // Initialize SpectatorPawn
-  spectatorPawn = new SpectatorPawn(scene, camera);
-
-  // Add keybinding for F8
-  window.addEventListener('keydown', (event) => {
-      if (event.code === 'F8') {
-          toggleSpectatorMode();
-      }
-  });
-  
   // Update legacy variables for compatibility
   updateLegacyVariables();
 }
@@ -71,18 +55,30 @@ function sendMessage() {
 }
 
 function joinChain() {
-  PauseUI.joinChain();
+  Network.joinChain();
   updateLegacyVariables();
 }
 
 // Legacy functions kept for compatibility
 function broadcastChain() {
-  PauseUI.broadcastChain();
+  // Only base peer does this (keeping for compatibility)
+  if (Network.isBase) {
+    // This function is kept for compatibility but may not be used in current implementation
+  }
 }
 
 function updateChainLinks() {
-  PauseUI.updateChainLinks();
+  // Legacy function kept for compatibility
+  // Current implementation uses simple pairing, not chain linking
 }
+
+// Expose functions globally for HTML onclick handlers
+window.sendMessage = sendMessage;
+window.joinChain = joinChain;
+window.broadcastChain = broadcastChain;
+
+// Start the application
+initializeApp();
 
 // Expose functions globally for HTML onclick handlers
 window.sendMessage = sendMessage;

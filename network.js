@@ -54,7 +54,10 @@ const Network = {
       console.log('[Network] Peer opened with ID:', id);
       this.isInitialized = true;
       if (this.callbacks.updateConnectionStatus) {
+        console.log('[Network] Calling updateConnectionStatus callback with:', `Connected as ${this.myPeerId}`);
         this.callbacks.updateConnectionStatus(`Connected as ${this.myPeerId}`);
+      } else {
+        console.log('[Network] updateConnectionStatus callback not found!');
       }
       if (this.callbacks.logChainEvent) {
         this.callbacks.logChainEvent(`[Peer] Initialized: ${this.myPeerId}`);
@@ -376,6 +379,11 @@ const Network = {
         this.basePeer = null;
       }
       
+      // Update UI to show we're searching for lobby
+      if (this.callbacks.updateUI) {
+        this.callbacks.updateUI();
+      }
+      
       // Try to join existing lobby first
       setTimeout(() => {
         this.joinChain();
@@ -387,6 +395,9 @@ const Network = {
     console.log('[Network] joinChain() called');
     if (this.callbacks.updateConnectionStatus) {
       this.callbacks.updateConnectionStatus('Discovering lobby...');
+    }
+    if (this.callbacks.updateUI) {
+      this.callbacks.updateUI();
     }
     
     // First, connect to BASE_PEER_ID for discovery
