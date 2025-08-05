@@ -1,68 +1,19 @@
 import * as THREE from 'https://cdn.skypack.dev/three@0.134.0';
 import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.134.0/examples/jsm/loaders/GLTFLoader.js';
 
-// Calculate ocean surface height at given x,z coordinates (matches shipPawn.js exactly)
-function calculateOceanHeight(x, z) {
-    // Access the global ocean variables from game.js
-    // These are the exact same variables used by the global ocean mesh
-    const globalOceanTime = window.globalOceanTime || 0;
-    const globalOceanWaveState = window.globalOceanWaveState || { 
-        amp: 1.0, 
-        speed: 1.0, 
-        storms: [] 
-    };
-    
-    // Base ocean level (matches game.js)
-    let height = 20.0;
-    
-    // Apply the exact same wave calculation as in game.js
-    const t = globalOceanTime;
-    
-    // Use the exact same getLocalWaveMultiplier function from game.js
-    function getLocalWaveMultiplier(x, z) {
-        // Storms: if inside a storm, use its amp
-        let localAmp = 1.0;
-        let swirlY = 0;
-        for (let storm of globalOceanWaveState.storms) {
-            const dx = x - storm.x;
-            const dz = z - storm.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
-            if (dist < storm.radius) {
-                // Smoother, more natural swirl
-                swirlY += Math.sin(storm.swirl + dist * 0.02) * storm.amp * (1 - dist / storm.radius) * 0.5;
-                localAmp = Math.max(localAmp, 1 + (storm.amp - 1) * (1 - dist / storm.radius));
-            }
-        }
-        // Example: Calm in center, wilder at edges
-        const dist = Math.sqrt(x * x + z * z);
-        let base = 1.0;
-        if (dist < 30) base = 0.7;
-        if (dist > 80) base = 1.5;
-        return base * localAmp + swirlY;
-    }
-    
-    const waveMultiplier = getLocalWaveMultiplier(x, z);
-    
-    // Apply the exact wave formulas from game.js
-    height += Math.sin(0.09 * x + t * 0.7) * 1.2 * waveMultiplier;
-    height += Math.cos(0.08 * z + t * 0.5) * 1.0 * waveMultiplier;
-    height += Math.sin(0.07 * (x + z) + t * 0.3) * 0.7 * waveMultiplier;
-    
-    return height;
-}
-
 export class NetworkedPlayer {
-    constructor(peerId, scene) {
+    constructor(peerId, scene, isHost = false) {
         this.peerId = peerId;
         this.scene = scene;
+        this.isHost = isHost; // Track if this is the host/server player
         
-        console.log(`[NetworkedPlayer] About to create ship for peer: ${peerId}`);
+        console.log(`[NetworkedPlayer] Creating ${isHost ? 'HOST' : 'CLIENT'} ship for peer: ${peerId}`);
         
         // Create the player group that will hold the ship
         this.pawn = new THREE.Group();
         this.pawn.position.set(0, 20, 0); // Start at water level
         
-        // Load Ship1.glb for networked players - same as everyone else
+        // Load Ship1.glb for networked players - same model as local player
         const loader = new GLTFLoader();
         loader.load(
             './Ship1.glb',
@@ -74,30 +25,13 @@ export class NetworkedPlayer {
                 shipModel.scale.setScalar(1.0);
                 shipModel.position.y = 0;
                 
-                // Apply RED color tint to ship materials
-                shipModel.traverse((child) => {
-                    if (child.isMesh && child.material) {
-                        // Clone material to avoid affecting other instances
-                        child.material = child.material.clone();
-                        
-                        // Apply red color tint
-                        const redColor = new THREE.Color(0xFF0000);
-                        if (child.material.color) {
-                            child.material.color.lerp(redColor, 0.3); // 30% red tint
-                        }
-                        
-                        // Add red emissive glow for visibility
-                        if (child.material.emissive) {
-                            child.material.emissive.copy(redColor);
-                            child.material.emissiveIntensity = 0.15;
-                        }
-                    }
-                });
+                // Apply different colors based on role
+                this.applyShipStyling(shipModel, isHost);
                 
                 this.pawn.add(shipModel);
-                this.pawn.shipModel = shipModel; // Store reference for animations
+                this.pawn.shipModel = shipModel; // Store reference
                 
-                console.log(`[NetworkedPlayer] RED Ship1.glb added to scene for peer: ${peerId}`);
+                console.log(`[NetworkedPlayer] Ship added to scene for peer: ${peerId}`);
             },
             (progress) => {
                 console.log(`[NetworkedPlayer] Loading Ship1.glb progress for ${peerId}:`, (progress.loaded / progress.total) * 100 + '%');
@@ -105,57 +39,107 @@ export class NetworkedPlayer {
             (error) => {
                 console.error(`[NetworkedPlayer] Error loading Ship1.glb for peer ${peerId}:`, error);
                 
-                // Fallback: create a simple red ship if GLTF fails
-                const fallbackGeometry = new THREE.BoxGeometry(3, 1, 6);
-                const fallbackMaterial = new THREE.MeshLambertMaterial({ 
-                    color: 0xFF0000,
-                    emissive: 0x440000,
-                    emissiveIntensity: 0.2
-                });
-                const fallbackShip = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
-                fallbackShip.position.y = 0;
-                this.pawn.add(fallbackShip);
-                this.pawn.shipModel = fallbackShip;
-                
-                console.log(`[NetworkedPlayer] Fallback ship created for peer: ${peerId}`);
+                // Fallback: create a simple colored ship if GLTF fails
+                this.createFallbackShip(isHost);
             }
         );
         
         this.scene.add(this.pawn);
         
-        // Network state variables
-        this.targetPosition = new THREE.Vector3();
-        this.targetRotation = new THREE.Euler();
-        
-        // Store the last known state
+        // Network state tracking
         this.lastKnownState = {
-            position: { x: 0, y: 0, z: 0 },
+            position: { x: 0, y: 20, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
             timestamp: Date.now()
         };
         
-        console.log(`[NetworkedPlayer] Created RED networked ship for peer: ${peerId} at position:`, this.pawn.position);
-        console.log(`[NetworkedPlayer] Player ${peerId} should be visible as RED ship in the scene`);
+        // Network status
+        this.lastUpdateTime = Date.now();
+        this.isActive = true;
+        
+        console.log(`[NetworkedPlayer] Created networked ship for peer: ${peerId} at position:`, this.pawn.position);
+    }
+    
+    // Apply visual styling based on player role
+    applyShipStyling(shipModel, isHost) {
+        const color = isHost ? new THREE.Color(0x00FF00) : new THREE.Color(0xFF0000); // Green for host, red for clients
+        const colorName = isHost ? 'GREEN (HOST)' : 'RED (CLIENT)';
+        
+        shipModel.traverse((child) => {
+            if (child.isMesh && child.material) {
+                // Clone material to avoid affecting other instances
+                child.material = child.material.clone();
+                
+                // Apply color tint
+                if (child.material.color) {
+                    child.material.color.lerp(color, 0.3); // 30% color tint
+                }
+                
+                // Add emissive glow for visibility
+                if (child.material.emissive) {
+                    child.material.emissive.copy(color);
+                    child.material.emissiveIntensity = 0.15;
+                }
+            }
+        });
+        
+        console.log(`[NetworkedPlayer] Applied ${colorName} styling to ship: ${this.peerId}`);
+    }
+    
+    // Create fallback ship if GLTF loading fails
+    createFallbackShip(isHost) {
+        const color = isHost ? 0x00FF00 : 0xFF0000; // Green for host, red for clients
+        const emissive = isHost ? 0x004400 : 0x440000;
+        
+        const fallbackGeometry = new THREE.BoxGeometry(3, 1, 6);
+        const fallbackMaterial = new THREE.MeshLambertMaterial({ 
+            color: color,
+            emissive: emissive,
+            emissiveIntensity: 0.2
+        });
+        const fallbackShip = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+        fallbackShip.position.y = 0;
+        this.pawn.add(fallbackShip);
+        this.pawn.shipModel = fallbackShip;
+        
+        console.log(`[NetworkedPlayer] Fallback ship created for peer: ${this.peerId}`);
     }
     
     // Update the player's state from network data
     updateFromNetwork(state) {
-        if (!state || !state.position) return;
-        
-        // Directly set position and rotation (no interpolation)
-        this.targetPosition.set(state.position.x, state.position.y, state.position.z);
-        
-        if (state.rotation) {
-            this.targetRotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+        if (!state || !state.position) {
+            console.warn(`[NetworkedPlayer] Invalid state received for ${this.peerId}:`, state);
+            return;
         }
         
         this.lastKnownState = { ...state };
+        this.lastUpdateTime = Date.now();
+        this.isActive = true;
         
-        // Immediately set position and rotation
-        this.pawn.position.copy(this.targetPosition);
+        // Directly apply the exact position and rotation vectors from the network
+        // This includes all bobbing, tilting, and physics that the sender calculated
+        this.pawn.position.set(state.position.x, state.position.y, state.position.z);
         
         if (state.rotation) {
-            this.pawn.rotation.copy(this.targetRotation);
+            this.pawn.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+        }
+        
+        // Apply ship model rotation (pitch, roll, leaning) if available
+        if (state.shipModelRotation && this.pawn.shipModel) {
+            this.pawn.shipModel.rotation.set(
+                state.shipModelRotation.x, 
+                state.shipModelRotation.y, 
+                state.shipModelRotation.z
+            );
+        }
+        
+        // Apply ship model position (bobbing effects) if available
+        if (state.shipModelPosition && this.pawn.shipModel) {
+            this.pawn.shipModel.position.set(
+                state.shipModelPosition.x, 
+                state.shipModelPosition.y, 
+                state.shipModelPosition.z
+            );
         }
         
         // Update surge state if available
@@ -163,48 +147,34 @@ export class NetworkedPlayer {
             this.pawn.setSurge(state.surgeActive);
         }
         
-        console.log(`[NetworkedPlayer] Updated RED ship ${this.peerId} position to:`, this.pawn.position);
+        console.log(`[NetworkedPlayer] Updated ${this.isHost ? 'HOST' : 'CLIENT'} ship ${this.peerId} to position:`, this.pawn.position, 'shipModel rotation:', this.pawn.shipModel?.rotation);
     }
     
     // Update the networked player (called each frame)
     update(deltaTime, animationTime) {
-        // Apply buoyancy - calculate ocean surface height at ship's position
-        const oceanSurfaceY = calculateOceanHeight(this.pawn.position.x, this.pawn.position.z);
+        // Check for network timeout (if no updates received for too long)
+        const timeSinceLastUpdate = Date.now() - this.lastUpdateTime;
+        const NETWORK_TIMEOUT = 5000; // 5 seconds
         
-        // No interpolation - directly use the target position and rotation
-        this.pawn.position.copy(this.targetPosition);
-        this.pawn.rotation.copy(this.targetRotation);
-        
-        // Always apply buoyancy (override Y position)
-        this.pawn.position.y = oceanSurfaceY;
-        
-        // Apply realistic ship motion based on wave slopes (like in shipPawn.js)
-        if (this.pawn.shipModel) {
-            // Calculate wave slope for realistic ship tilting
-            const sampleDistance = 2.0; // Sample points around ship for slope calculation
-            const heightFront = calculateOceanHeight(this.pawn.position.x, this.pawn.position.z + sampleDistance);
-            const heightBack = calculateOceanHeight(this.pawn.position.x, this.pawn.position.z - sampleDistance);
-            const heightLeft = calculateOceanHeight(this.pawn.position.x - sampleDistance, this.pawn.position.z);
-            const heightRight = calculateOceanHeight(this.pawn.position.x + sampleDistance, this.pawn.position.z);
-            
-            // Calculate pitch (front-back tilt) and roll (left-right tilt)
-            const pitch = Math.atan2(heightFront - heightBack, sampleDistance * 2) * 0.5; // Reduce intensity
-            const roll = Math.atan2(heightRight - heightLeft, sampleDistance * 2) * 0.5;
-            
-            // Apply natural ship motion based on wave slopes
-            this.pawn.shipModel.rotation.x = pitch;
-            this.pawn.shipModel.rotation.z = roll;
-            
-            // Add subtle additional bobbing for ship feel
-            const time = animationTime || (Date.now() * 0.001);
-            const bobOffset = Math.sin(time * 0.8) * 0.1;
-            this.pawn.shipModel.position.y = bobOffset;
+        if (timeSinceLastUpdate > NETWORK_TIMEOUT && this.isActive) {
+            console.warn(`[NetworkedPlayer] No network updates for ${this.peerId} in ${timeSinceLastUpdate}ms - marking as inactive`);
+            this.isActive = false;
+            // Could add visual indicator here (fade out, different color, etc.)
         }
         
-        // Update the pawn animations (if any)
-        if (this.pawn.update) {
-            this.pawn.update(deltaTime, animationTime);
-        }
+        // Pure network replication - no local physics or movement
+        // All bobbing, tilting, and physics are already baked into the position/rotation
+        // vectors received from the network, so we don't modify them at all
+    }
+    
+    // Check if this networked player is currently active
+    isPlayerActive() {
+        return this.isActive;
+    }
+    
+    // Get the role of this networked player
+    getRole() {
+        return this.isHost ? 'HOST' : 'CLIENT';
     }
     
     // Remove the networked player from the scene
@@ -226,21 +196,56 @@ export class NetworkedPlayerManager {
     constructor(scene) {
         this.scene = scene;
         this.networkedPlayers = new Map(); // Map<peerId, NetworkedPlayer>
+        this.isMultiplayerMode = false;
+        this.localPeerId = null;
         
         console.log('[NetworkedPlayerManager] Initialized');
+        
+        // Detect if we're in multiplayer mode
+        this.detectMultiplayerMode();
+    }
+    
+    // Detect if we're running in single player or multiplayer mode
+    detectMultiplayerMode() {
+        // Check if networking system is available and initialized
+        if (window.Network && window.Network.isInitialized) {
+            this.isMultiplayerMode = true;
+            this.localPeerId = window.Network.myPeerId;
+            console.log(`[NetworkedPlayerManager] Multiplayer mode detected - Local peer: ${this.localPeerId}`);
+        } else {
+            this.isMultiplayerMode = false;
+            console.log('[NetworkedPlayerManager] Single player mode detected');
+        }
+    }
+    
+    // Check if we should create networked players (only in multiplayer)
+    shouldCreateNetworkedPlayers() {
+        return this.isMultiplayerMode;
     }
     
     // Add a new networked player ship
-    addPlayer(peerId) {
+    addPlayer(peerId, isHost = false) {
+        // Don't create networked players in single player mode
+        if (!this.shouldCreateNetworkedPlayers()) {
+            console.log(`[NetworkedPlayerManager] Skipping player creation in single player mode: ${peerId}`);
+            return;
+        }
+        
+        // Don't create a networked player for ourselves
+        if (peerId === this.localPeerId) {
+            console.log(`[NetworkedPlayerManager] Skipping self-player creation: ${peerId}`);
+            return;
+        }
+        
         if (this.networkedPlayers.has(peerId)) {
             console.warn(`[NetworkedPlayerManager] Player ${peerId} already exists`);
             return;
         }
         
-        const networkedPlayer = new NetworkedPlayer(peerId, this.scene);
+        const networkedPlayer = new NetworkedPlayer(peerId, this.scene, isHost);
         this.networkedPlayers.set(peerId, networkedPlayer);
         
-        console.log(`[NetworkedPlayerManager] Added ship: ${peerId}`);
+        console.log(`[NetworkedPlayerManager] Added ${isHost ? 'HOST' : 'CLIENT'} ship: ${peerId}`);
     }
     
     // Remove a networked player
@@ -255,28 +260,98 @@ export class NetworkedPlayerManager {
     
     // Update a player's state from network data
     updatePlayer(peerId, state) {
+        // Only handle updates in multiplayer mode
+        if (!this.shouldCreateNetworkedPlayers()) {
+            return;
+        }
+        
         const networkedPlayer = this.networkedPlayers.get(peerId);
         if (networkedPlayer) {
             networkedPlayer.updateFromNetwork(state);
         } else {
             console.warn(`[NetworkedPlayerManager] Received update for unknown ship: ${peerId}`);
+            // Auto-create player if they don't exist (they might have joined mid-game)
+            const isHost = window.Network && window.Network.isBase && peerId !== window.Network.myPeerId;
+            this.addPlayer(peerId, isHost);
+            
+            // Try to update again after creation
+            const newPlayer = this.networkedPlayers.get(peerId);
+            if (newPlayer) {
+                newPlayer.updateFromNetwork(state);
+            }
         }
     }
     
     // Update all networked player ships (called each frame)
     update(deltaTime, animationTime) {
+        // Only update in multiplayer mode
+        if (!this.shouldCreateNetworkedPlayers()) {
+            return;
+        }
+        
         for (const [peerId, networkedPlayer] of this.networkedPlayers) {
             networkedPlayer.update(deltaTime, animationTime);
+        }
+        
+        // Clean up inactive players periodically
+        this.cleanupInactivePlayers();
+    }
+    
+    // Remove players that haven't been updated in a long time
+    cleanupInactivePlayers() {
+        const CLEANUP_INTERVAL = 10000; // Check every 10 seconds
+        const now = Date.now();
+        
+        if (!this.lastCleanupTime || now - this.lastCleanupTime > CLEANUP_INTERVAL) {
+            this.lastCleanupTime = now;
+            
+            for (const [peerId, networkedPlayer] of this.networkedPlayers) {
+                if (!networkedPlayer.isPlayerActive()) {
+                    console.log(`[NetworkedPlayerManager] Cleaning up inactive player: ${peerId}`);
+                    this.removePlayer(peerId);
+                }
+            }
         }
     }
     
     // Get all networked player ship positions (for terrain generation, etc.)
     getAllPositions() {
+        if (!this.shouldCreateNetworkedPlayers()) {
+            return [];
+        }
+        
         const positions = [];
         for (const [peerId, networkedPlayer] of this.networkedPlayers) {
-            positions.push(networkedPlayer.getPosition());
+            if (networkedPlayer.isPlayerActive()) {
+                positions.push(networkedPlayer.getPosition());
+            }
         }
         return positions;
+    }
+    
+    // Get count of active networked players
+    getActivePlayerCount() {
+        if (!this.shouldCreateNetworkedPlayers()) {
+            return 0;
+        }
+        
+        let count = 0;
+        for (const [peerId, networkedPlayer] of this.networkedPlayers) {
+            if (networkedPlayer.isPlayerActive()) {
+                count++;
+            }
+        }
+        return count;
+    }
+    
+    // Get networking mode info
+    getNetworkInfo() {
+        return {
+            isMultiplayer: this.isMultiplayerMode,
+            localPeerId: this.localPeerId,
+            activePlayerCount: this.getActivePlayerCount(),
+            totalPlayerCount: this.networkedPlayers.size
+        };
     }
     
     // Clear all networked players

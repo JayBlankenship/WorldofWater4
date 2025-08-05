@@ -226,27 +226,25 @@ function initGame() {
     const playerPawn = createShipPawn(false, null, false); // false indicates human player, no star
     scene.add(playerPawn);
 
-    // Initialize networked player manager for red replicated players
+    // Initialize networked player manager for multiplayer replication
     const networkedPlayerManager = new NetworkedPlayerManager(scene);
     console.log('[Game] NetworkedPlayerManager initialized');
     
-    // Set up network callbacks for player replication once connected
-    if (window.Network) {
+    // Set up network callbacks for player replication (only if networking is available)
+    if (window.Network && networkedPlayerManager.shouldCreateNetworkedPlayers()) {
+        console.log('[Game] Setting up multiplayer network callbacks');
+        
         // Handle incoming player state updates from other clients
         window.Network.callbacks.handlePlayerState = (peerId, state) => {
             console.log(`[Game] Received player state from ${peerId}:`, state);
-            console.log(`[Game] Current networked players:`, Array.from(networkedPlayerManager.networkedPlayers.keys()));
             
-            // Auto-create networked player if they don't exist yet
-            if (!networkedPlayerManager.networkedPlayers.has(peerId)) {
-                console.log(`[Game] Auto-creating networked player for ${peerId} since they sent state`);
-                networkedPlayerManager.addPlayer(peerId);
-            }
+            // Determine if this is the host player
+            const isHostPlayer = window.Network.isBase && peerId !== window.Network.myPeerId;
             
             networkedPlayerManager.updatePlayer(peerId, state);
         };
         
-        // Track when players join/leave the lobby to create/remove red players
+        // Track when players join/leave the lobby to create/remove networked players
         const originalUpdateUI = window.Network.callbacks.updateUI;
         window.Network.callbacks.updateUI = function(peers) {
             // Call original updateUI if it exists
@@ -260,35 +258,49 @@ function initGame() {
         
         // Function to handle networked player creation and cleanup
         function updateNetworkedPlayers() {
-            // Only create red players if we're in a complete lobby
+            // Only create networked players if we're in a complete multiplayer lobby
             if (window.Network.isInCompleteLobby && window.Network.isInCompleteLobby()) {
                 const currentPeerIds = window.Network.getLobbyPeerIds();
                 const existingPeerIds = Array.from(networkedPlayerManager.networkedPlayers.keys());
                 
-                console.log(`[Game] Lobby complete! My role: ${window.Network.isBase ? 'HOST' : 'CLIENT'}`);
-                console.log(`[Game] Current peers from getLobbyPeerIds():`, currentPeerIds);
+                console.log(`[Game] Multiplayer lobby complete! My role: ${window.Network.isBase ? 'HOST' : 'CLIENT'}`);
+                console.log(`[Game] Current peers:`, currentPeerIds);
                 console.log(`[Game] Existing networked players:`, existingPeerIds);
                 console.log(`[Game] My peer ID: ${window.Network.myPeerId}`);
-                console.log(`[Game] All lobby connected peers:`, window.Network.lobbyConnectedPeers || 'N/A');
-                console.log(`[Game] Lobby peers array:`, window.Network.lobbyPeers || 'N/A');
                 
-                // Add new players as red replicated pawns
+                // Add networked players for all other peers in the lobby
                 for (const peerId of currentPeerIds) {
-                    if (!existingPeerIds.includes(peerId)) {
-                        console.log(`[Game] Creating RED networked player for peer: ${peerId}`);
-                        networkedPlayerManager.addPlayer(peerId);
+                    if (peerId !== window.Network.myPeerId && !networkedPlayerManager.networkedPlayers.has(peerId)) {
+                        const isHostPlayer = window.Network.isBase && peerId !== window.Network.myPeerId;
+                        console.log(`[Game] Creating networked player for ${peerId} (${isHostPlayer ? 'HOST' : 'CLIENT'})`);
+                        networkedPlayerManager.addPlayer(peerId, isHostPlayer);
                     }
                 }
                 
-                // Remove disconnected players
+                // Remove networked players that are no longer in the lobby
                 for (const peerId of existingPeerIds) {
                     if (!currentPeerIds.includes(peerId)) {
-                        console.log(`[Game] Removing networked player for peer: ${peerId}`);
+                        console.log(`[Game] Removing networked player: ${peerId}`);
                         networkedPlayerManager.removePlayer(peerId);
                     }
                 }
+            } else {
+                console.log('[Game] Lobby not complete or in single player mode - no networked players needed');
             }
         }
+    } else {
+        console.log('[Game] Single player mode - no networking available');
+        
+        // Create a dummy updateNetworkedPlayers function for single player
+        function updateNetworkedPlayers() {
+            // Do nothing in single player mode
+        }
+    }
+    
+    // Display current mode info
+    console.log(`[Game] Game mode: ${networkedPlayerManager.isMultiplayerMode ? 'MULTIPLAYER' : 'SINGLE PLAYER'}`);
+    if (networkedPlayerManager.isMultiplayerMode) {
+        console.log(`[Game] Network info:`, networkedPlayerManager.getNetworkInfo());
         
         // Call updateNetworkedPlayers initially and whenever lobby state changes
         setTimeout(() => {
@@ -738,15 +750,16 @@ function initGame() {
             }
         }
         
-        // More robust broadcasting condition - try to broadcast if we have network AND either peers or connections
-        const shouldBroadcast = window.Network && isInitialized && (
+        // Only attempt networking if we're in multiplayer mode
+        const shouldBroadcast = networkedPlayerManager.shouldCreateNetworkedPlayers() && 
+            window.Network && isInitialized && (
             hasAnyPeers || 
             (window.Network.isBase && window.Network.lobbyPeerConnections && Object.keys(window.Network.lobbyPeerConnections).length > 0) ||
             (!window.Network.isBase && window.Network.hostConn && window.Network.hostConn.open)
         );
         
         if (shouldBroadcast) {
-            // Create player state object
+            // Create player state object with comprehensive rotation data
             const playerState = {
                 position: {
                     x: playerPawn.position.x,
@@ -758,6 +771,18 @@ function initGame() {
                     y: playerPawn.rotation.y,
                     z: playerPawn.rotation.z
                 },
+                // Ship model rotation (pitch, roll, and leaning from wave effects)
+                shipModelRotation: playerPawn.shipModel ? {
+                    x: playerPawn.shipModel.rotation.x,
+                    y: playerPawn.shipModel.rotation.y,
+                    z: playerPawn.shipModel.rotation.z
+                } : null,
+                // Ship model position (for bobbing effects)
+                shipModelPosition: playerPawn.shipModel ? {
+                    x: playerPawn.shipModel.position.x,
+                    y: playerPawn.shipModel.position.y,
+                    z: playerPawn.shipModel.position.z
+                } : null,
                 surgeActive: playerPawn.surgeActive || false
             };
             

@@ -1079,6 +1079,17 @@ const Network = {
         this.callbacks.logChainEvent(`[Relay] Relayed terrain changes to ${relayCount} peers`);
       }
     }
+  },
+  
+  // Utility methods for networked player system
+  isConnected() {
+    return this.isInitialized && (this.paired || this.lobbyFull || Object.keys(this.lobbyPeerConnections).length > 0);
+  },
+  
+  hasConnections() {
+    return Object.keys(this.lobbyPeerConnections).length > 0 || 
+           (this.hostConn && this.hostConn.open) ||
+           Object.keys(this.basePeerConnections).length > 0;
   }
 };
 
