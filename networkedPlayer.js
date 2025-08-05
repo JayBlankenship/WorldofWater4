@@ -31,6 +31,9 @@ export class NetworkedPlayer {
                 this.pawn.add(shipModel);
                 this.pawn.shipModel = shipModel; // Store reference
                 
+                // Initialize interpolation values to current state
+                this.initializeInterpolation();
+                
                 console.log(`[NetworkedPlayer] Ship added to scene for peer: ${peerId}`);
             },
             (progress) => {
@@ -53,9 +56,30 @@ export class NetworkedPlayer {
             timestamp: Date.now()
         };
         
+        // Interpolation state for smooth movement
+        this.interpolation = {
+            // Current interpolated values
+            position: new THREE.Vector3(0, 20, 0),
+            rotation: new THREE.Euler(0, 0, 0),
+            shipModelPosition: new THREE.Vector3(0, 0, 0),
+            shipModelRotation: new THREE.Euler(0, 0, 0),
+            
+            // Target values from network
+            targetPosition: new THREE.Vector3(0, 20, 0),
+            targetRotation: new THREE.Euler(0, 0, 0),
+            targetShipModelPosition: new THREE.Vector3(0, 0, 0),
+            targetShipModelRotation: new THREE.Euler(0, 0, 0),
+            
+            // Interpolation settings
+            positionLerpSpeed: 8.0, // How fast to lerp position
+            rotationLerpSpeed: 6.0, // How fast to lerp rotation
+            shipModelLerpSpeed: 10.0 // Fast lerp for ship model details
+        };
+        
         // Network status
         this.lastUpdateTime = Date.now();
         this.isActive = true;
+        this.hasReceivedFirstUpdate = false; // Track if we've received network data yet
         
         console.log(`[NetworkedPlayer] Created networked ship for peer: ${peerId} at position:`, this.pawn.position);
     }
@@ -86,6 +110,25 @@ export class NetworkedPlayer {
         console.log(`[NetworkedPlayer] Applied ${colorName} styling to ship: ${this.peerId}`);
     }
     
+    // Initialize interpolation values to match current state
+    initializeInterpolation() {
+        if (this.pawn) {
+            // Set current interpolation values to match the pawn's current state
+            this.interpolation.position.copy(this.pawn.position);
+            this.interpolation.targetPosition.copy(this.pawn.position);
+            this.interpolation.rotation.copy(this.pawn.rotation);
+            this.interpolation.targetRotation.copy(this.pawn.rotation);
+            
+            // Initialize ship model interpolation if ship model exists
+            if (this.pawn.shipModel) {
+                this.interpolation.shipModelPosition.copy(this.pawn.shipModel.position);
+                this.interpolation.targetShipModelPosition.copy(this.pawn.shipModel.position);
+                this.interpolation.shipModelRotation.copy(this.pawn.shipModel.rotation);
+                this.interpolation.targetShipModelRotation.copy(this.pawn.shipModel.rotation);
+            }
+        }
+    }
+    
     // Create fallback ship if GLTF loading fails
     createFallbackShip(isHost) {
         const color = isHost ? 0x00FF00 : 0xFF0000; // Green for host, red for clients
@@ -102,6 +145,9 @@ export class NetworkedPlayer {
         this.pawn.add(fallbackShip);
         this.pawn.shipModel = fallbackShip;
         
+        // Initialize interpolation values to current state
+        this.initializeInterpolation();
+        
         console.log(`[NetworkedPlayer] Fallback ship created for peer: ${this.peerId}`);
     }
     
@@ -116,38 +162,74 @@ export class NetworkedPlayer {
         this.lastUpdateTime = Date.now();
         this.isActive = true;
         
-        // Directly apply the exact position and rotation vectors from the network
-        // This includes all bobbing, tilting, and physics that the sender calculated
-        this.pawn.position.set(state.position.x, state.position.y, state.position.z);
-        
-        if (state.rotation) {
-            this.pawn.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
-        }
-        
-        // Apply ship model rotation (pitch, roll, leaning) if available
-        if (state.shipModelRotation && this.pawn.shipModel) {
-            this.pawn.shipModel.rotation.set(
-                state.shipModelRotation.x, 
-                state.shipModelRotation.y, 
-                state.shipModelRotation.z
-            );
-        }
-        
-        // Apply ship model position (bobbing effects) if available
-        if (state.shipModelPosition && this.pawn.shipModel) {
-            this.pawn.shipModel.position.set(
-                state.shipModelPosition.x, 
-                state.shipModelPosition.y, 
-                state.shipModelPosition.z
-            );
+        // For the first update, snap immediately to avoid interpolating from spawn position
+        if (!this.hasReceivedFirstUpdate) {
+            this.hasReceivedFirstUpdate = true;
+            
+            // Snap to the exact network position for first update
+            this.interpolation.position.set(state.position.x, state.position.y, state.position.z);
+            this.interpolation.targetPosition.set(state.position.x, state.position.y, state.position.z);
+            this.pawn.position.copy(this.interpolation.position);
+            
+            if (state.rotation) {
+                this.interpolation.rotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+                this.interpolation.targetRotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+                this.pawn.rotation.copy(this.interpolation.rotation);
+            }
+            
+            // Snap ship model transforms for first update
+            if (state.shipModelRotation && this.pawn.shipModel) {
+                this.interpolation.shipModelRotation.set(
+                    state.shipModelRotation.x, 
+                    state.shipModelRotation.y, 
+                    state.shipModelRotation.z
+                );
+                this.interpolation.targetShipModelRotation.copy(this.interpolation.shipModelRotation);
+                this.pawn.shipModel.rotation.copy(this.interpolation.shipModelRotation);
+            }
+            
+            if (state.shipModelPosition && this.pawn.shipModel) {
+                this.interpolation.shipModelPosition.set(
+                    state.shipModelPosition.x, 
+                    state.shipModelPosition.y, 
+                    state.shipModelPosition.z
+                );
+                this.interpolation.targetShipModelPosition.copy(this.interpolation.shipModelPosition);
+                this.pawn.shipModel.position.copy(this.interpolation.shipModelPosition);
+            }
+            
+            console.log(`[NetworkedPlayer] First update - snapped ${this.isHost ? 'HOST' : 'CLIENT'} ship ${this.peerId} to position:`, this.pawn.position);
+            
+        } else {
+            // For subsequent updates, set new targets for smooth interpolation
+            this.interpolation.targetPosition.set(state.position.x, state.position.y, state.position.z);
+            
+            if (state.rotation) {
+                this.interpolation.targetRotation.set(state.rotation.x, state.rotation.y, state.rotation.z);
+            }
+            
+            // Update ship model targets if available
+            if (state.shipModelRotation) {
+                this.interpolation.targetShipModelRotation.set(
+                    state.shipModelRotation.x, 
+                    state.shipModelRotation.y, 
+                    state.shipModelRotation.z
+                );
+            }
+            
+            if (state.shipModelPosition) {
+                this.interpolation.targetShipModelPosition.set(
+                    state.shipModelPosition.x, 
+                    state.shipModelPosition.y, 
+                    state.shipModelPosition.z
+                );
+            }
         }
         
         // Update surge state if available
         if (typeof state.surgeActive !== 'undefined' && this.pawn.setSurge) {
             this.pawn.setSurge(state.surgeActive);
         }
-        
-        console.log(`[NetworkedPlayer] Updated ${this.isHost ? 'HOST' : 'CLIENT'} ship ${this.peerId} to position:`, this.pawn.position, 'shipModel rotation:', this.pawn.shipModel?.rotation);
     }
     
     // Update the networked player (called each frame)
@@ -162,9 +244,40 @@ export class NetworkedPlayer {
             // Could add visual indicator here (fade out, different color, etc.)
         }
         
-        // Pure network replication - no local physics or movement
-        // All bobbing, tilting, and physics are already baked into the position/rotation
-        // vectors received from the network, so we don't modify them at all
+        // Smooth interpolation towards target values
+        if (this.isActive) {
+            // Interpolate main position and rotation
+            this.interpolation.position.lerp(this.interpolation.targetPosition, this.interpolation.positionLerpSpeed * deltaTime);
+            
+            // For rotation, we need to handle the interpolation more carefully to avoid issues with angle wrapping
+            this.interpolateEuler(this.interpolation.rotation, this.interpolation.targetRotation, this.interpolation.rotationLerpSpeed * deltaTime);
+            
+            // Apply interpolated values to the pawn
+            this.pawn.position.copy(this.interpolation.position);
+            this.pawn.rotation.copy(this.interpolation.rotation);
+            
+            // Interpolate ship model position and rotation if ship model exists
+            if (this.pawn.shipModel) {
+                this.interpolation.shipModelPosition.lerp(this.interpolation.targetShipModelPosition, this.interpolation.shipModelLerpSpeed * deltaTime);
+                this.interpolateEuler(this.interpolation.shipModelRotation, this.interpolation.targetShipModelRotation, this.interpolation.shipModelLerpSpeed * deltaTime);
+                
+                this.pawn.shipModel.position.copy(this.interpolation.shipModelPosition);
+                this.pawn.shipModel.rotation.copy(this.interpolation.shipModelRotation);
+            }
+        }
+    }
+    
+    // Helper function to interpolate Euler angles safely
+    interpolateEuler(current, target, alpha) {
+        // Convert to quaternions for smooth rotation interpolation
+        const currentQuat = new THREE.Quaternion().setFromEuler(current);
+        const targetQuat = new THREE.Quaternion().setFromEuler(target);
+        
+        // Spherical linear interpolation (slerp) for smooth rotation
+        currentQuat.slerp(targetQuat, alpha);
+        
+        // Convert back to Euler and update the current rotation
+        current.setFromQuaternion(currentQuat, current.order);
     }
     
     // Check if this networked player is currently active
