@@ -167,10 +167,17 @@ const Network = {
                 }
                 
                 // Now that lobby is full, release the BASE_PEER_ID so others can start new lobbies
+                // BUT keep a reference to prevent premature garbage collection
                 if (this.callbacks.logChainEvent) {
-                  this.callbacks.logChainEvent(`[Host] Releasing BASE_PEER_ID to allow new lobbies to form`);
+                  this.callbacks.logChainEvent(`[Host] Lobby complete, allowing new lobbies to form`);
                 }
-                this.basePeer.destroy(); // Release the BASE_PEER_ID for others to use
+                // Delay the basePeer destruction to ensure stability
+                setTimeout(() => {
+                  if (this.basePeer) {
+                    this.basePeer.destroy(); // Release the BASE_PEER_ID for others to use
+                    this.basePeer = null;
+                  }
+                }, 5000); // Wait 5 seconds to ensure all connections are stable
               } else {
                 // Not enough players yet, send waiting notification
                 conn.send({ 
@@ -260,11 +267,26 @@ const Network = {
     });
 
     this.peer.on('error', (err) => {
+      // Improved error handling to prevent disconnections
       if (this.callbacks.updateConnectionStatus) {
         this.callbacks.updateConnectionStatus(`Peer error: ${err.message}`);
       }
       if (this.callbacks.logChainEvent) {
         this.callbacks.logChainEvent(`[Peer] Error: ${err.message}`, '#ff4444');
+      }
+      
+      // Don't let peer errors cause complete disconnection
+      // Most peer errors are recoverable and shouldn't destroy the connection
+      if (err.type === 'network' || err.type === 'peer-unavailable') {
+        // These are temporary network issues, don't reconnect immediately
+        if (this.callbacks.logChainEvent) {
+          this.callbacks.logChainEvent(`[Peer] Network error detected, maintaining connection`, '#ffaa00');
+        }
+      } else if (err.type === 'browser-incompatible' || err.type === 'invalid-id') {
+        // These are serious errors that require action
+        if (this.callbacks.logChainEvent) {
+          this.callbacks.logChainEvent(`[Peer] Critical error: ${err.type}`, '#ff0000');
+        }
       }
     });
   },
@@ -412,7 +434,7 @@ const Network = {
     });
 
     this.baseConn.on('data', (data) => {
-      console.log('Client received discovery data:', data);
+      // Removed client discovery data logging for performance
       
       if (data.type === 'redirect_to_host') {
         // Close discovery connection
@@ -496,7 +518,7 @@ const Network = {
     });
 
     this.hostConn.on('data', (data) => {
-      console.log('Client received host data:', data);
+      // Removed client host data logging for performance
       
       if (data.type === 'host_ready') {
         // Connected to host - lobby is ready
@@ -505,18 +527,6 @@ const Network = {
         this.lobbyPeers = data.allPlayers.filter(peer => peer !== this.myPeerId); // All other players (including host)
         this.paired = true;
         this.baseConn = this.hostConn; // Use host connection as base connection for compatibility
-        
-        console.log('Client lobby ready - allPlayers:', data.allPlayers);
-        console.log('Client lobby - lobbyPeers (all others including host):', this.lobbyPeers);
-        console.log('Client lobby - total players:', data.allPlayers.length);
-        console.log('Client lobby - my peer ID:', this.myPeerId);
-        
-        if (this.callbacks.logChainEvent) {
-          this.callbacks.logChainEvent(`[Client] Connected to host: ${data.hostId}, All players: ${data.allPlayers.join(', ')}`);
-          this.callbacks.logChainEvent(`[Client] Lobby has ${data.allPlayers.length} total players (including host)`);
-          this.callbacks.logChainEvent(`[Client] Other players (including host): ${this.lobbyPeers.join(', ')}`);
-          this.callbacks.logChainEvent(`[Client] Other clients only: ${this.lobbyPeers.filter(p => p !== data.hostId).join(', ')}`);
-        }
         if (this.callbacks.updateConnectionStatus) {
           this.callbacks.updateConnectionStatus(`Connected to host in ${data.allPlayers.length}-player lobby!`);
         }
@@ -525,7 +535,6 @@ const Network = {
         }
       } else if (data.type === 'waiting') {
         // Host is still waiting for more players
-        console.log('Client waiting for more players:', data);
         
         if (this.callbacks.logChainEvent) {
           this.callbacks.logChainEvent(`[Client] Waiting for more players... (${data.current}/${data.total}) - ${data.message || 'Lobby not full yet'}`);
@@ -568,9 +577,6 @@ const Network = {
   },
 
   handleData(conn, data) {
-    if (this.callbacks.logChainEvent) {
-      this.callbacks.logChainEvent(`[HandleData] Received ${data.type} from ${conn.peer}, we are ${this.isBase ? 'HOST' : 'CLIENT'}`);
-    }
     
     if (data.type === 'message') {
       // Display the message locally first
@@ -587,9 +593,6 @@ const Network = {
     if (data.type === 'player_state') {
       // Handle incoming player state updates
       if (data.peerId !== this.myPeerId) { // Don't process our own state
-        if (this.callbacks.logChainEvent) {
-          this.callbacks.logChainEvent(`[${this.isBase ? 'Host' : 'Client'}] Received player_state from ${data.peerId}, processing locally`);
-        }
         if (this.callbacks.handlePlayerState) {
           this.callbacks.handlePlayerState(data.peerId, data.state);
         }
@@ -599,9 +602,7 @@ const Network = {
           this.relayPlayerState(data, conn ? conn.peer : null);
         }
       } else {
-        if (this.callbacks.logChainEvent) {
-          this.callbacks.logChainEvent(`[${this.isBase ? 'Host' : 'Client'}] Ignoring player_state from self: ${data.peerId}`);
-        }
+        // Ignoring player_state from self
       }
     }
     
@@ -685,7 +686,7 @@ const Network = {
               this.callbacks.logChainEvent(`[PlayerStateRelay] Sent state to ${peerId}`);
             }
           } catch (err) {
-            console.warn(`[Host-PlayerStateRelay] Failed to send to ${peerId}:`, err);
+            // Removed frequent player state relay error logging for performance
             if (this.callbacks.logChainEvent) {
               this.callbacks.logChainEvent(`[PlayerStateRelay] Failed to send to ${peerId}: ${err.message}`, '#ff4444');
             }
@@ -851,10 +852,60 @@ const Network = {
     }, 1000);
   },
 
-  // Auto-reconnection - updated for host-based system
+  // Check connection health and log status
+  checkConnectionHealth() {
+    if (!this.isInitialized) return false;
+    
+    if (this.isBase) {
+      // Host checks
+      if (!this.paired) {
+        if (this.callbacks.logChainEvent) {
+          this.callbacks.logChainEvent('[Health] Host not paired yet', '#ff8800');
+        }
+        return false;
+      }
+      
+      const activeConnections = this.partnerConnections ? 
+        Object.values(this.partnerConnections).filter(conn => conn && conn.open).length : 0;
+      const totalConnections = this.partnerConnections ? 
+        Object.keys(this.partnerConnections).length : 0;
+        
+      if (this.callbacks.logChainEvent) {
+        this.callbacks.logChainEvent(`[Health] Host: ${activeConnections}/${totalConnections} active connections`, '#00ff00');
+      }
+      
+      return activeConnections > 0;
+    } else {
+      // Client checks
+      const connected = this.baseConn && this.baseConn.open;
+      if (this.callbacks.logChainEvent) {
+        const status = connected ? 'Connected' : 'Disconnected';
+        const color = connected ? '#00ff00' : '#ff0000';
+        this.callbacks.logChainEvent(`[Health] Client: ${status} to host`, color);
+      }
+      return connected;
+    }
+  },
+
+  // Auto-reconnection - updated for host-based system with improved stability
   startAutoReconnect() {
     setInterval(() => {
       if (!this.isInitialized) return;
+      
+      // Regular health check
+      this.checkConnectionHealth();
+      
+      // If we're properly connected and everything is working, don't spam reconnection attempts
+      if (this.paired && this.baseConn && this.baseConn.open) {
+        // Client is connected and working fine, no need to check for reconnection
+        return;
+      }
+      
+      // For hosts, be more conservative about reconnection attempts
+      if (this.isBase && this.paired) {
+        // Host is working, don't interfere with connections
+        return;
+      }
       
       // If we're a client and lost connection to host
       if (!this.isBase && this.partnerPeerId && (!this.baseConn || this.baseConn.open === false)) {
@@ -873,17 +924,18 @@ const Network = {
           if (this.callbacks.logChainEvent) {
             this.callbacks.logChainEvent(`[Auto] Host has ${activeConnections}/${totalConnections} active client connections`, '#ff8800');
           }
+          // Don't take any action - let clients reconnect naturally
         }
       }
       
-      // If we're not in a lobby at all, try to find one
-      if (!this.paired && !this.isBase) {
+      // If we're not in a lobby at all, try to find one (but not if we know we're supposed to be a client)
+      if (!this.paired && !this.isBase && !this.partnerPeerId) {
         if (this.callbacks.logChainEvent) {
           this.callbacks.logChainEvent(`[Auto] Not in lobby, attempting to find ${this.LOBBY_SIZE}-player lobby...`, '#00ccff');
         }
         this.tryBecomeBase();
       }
-    }, 5000);
+    }, 10000); // Increased interval to 10 seconds for less aggressive reconnection
   },
 
   // --- PLAYER STATE SYNCHRONIZATION ---
@@ -892,7 +944,7 @@ const Network = {
   broadcastPlayerState(playerState) {
     // Allow broadcasting as soon as we have any connections, not just when lobby is complete
     if (!this.isInitialized) {
-      console.warn(`[Network] Cannot broadcast - not initialized`);
+      // Removed frequent broadcast initialization warning for performance
       return;
     }
     
@@ -914,20 +966,20 @@ const Network = {
       if (this.callbacks.logChainEvent) {
         this.callbacks.logChainEvent(`[Host] Broadcasting player state to ${connectionKeys.length} clients (lobby filling)`);
       }
-      console.log(`[Host-Broadcast] Attempting to send host state to ${connectionKeys.length} clients:`, stateMessage);
+      // Removed frequent host broadcast logging for performance
       
       for (const [peerId, conn] of Object.entries(this.lobbyPeerConnections)) {
         if (conn && conn.open) {
           try {
             conn.send(stateMessage);
             sentCount++;
-            console.log(`[Host-Broadcast] ✓ Sent state to client: ${peerId}`);
+            // Removed frequent successful send logging for performance
           } catch (error) {
-            console.warn(`[Host-Broadcast] ✗ Failed to send player state to ${peerId}:`, error);
+            // Removed frequent send failure logging for performance
             totalFailed++;
           }
         } else {
-          console.warn(`[Host-Broadcast] ✗ Connection to ${peerId} is not open (conn=${!!conn}, open=${conn?.open})`);
+          // Removed frequent connection status logging for performance
           totalFailed++;
         }
       }
@@ -937,17 +989,12 @@ const Network = {
       if (this.callbacks.logChainEvent) {
         this.callbacks.logChainEvent(`[Host] Sent player state to ${sentCount} clients`);
       }
-      console.log(`[Host-Broadcast] Summary: sent to ${sentCount}/${connectionKeys.length} clients, ${totalFailed} failed`);
+      // Removed frequent broadcast summary logging for performance
       
       // Additional debugging if no clients received the message
       if (sentCount === 0 && connectionKeys.length > 0) {
-        console.error(`[Host-Broadcast] CRITICAL: Failed to send to ANY clients despite having ${connectionKeys.length} connections!`);
-        console.error(`[Host-Broadcast] Connection states:`, Object.fromEntries(
-          Object.entries(this.lobbyPeerConnections).map(([peerId, conn]) => [
-            peerId, 
-            { exists: !!conn, open: conn?.open, readyState: conn?.readyState }
-          ])
-        ));
+        // Removed critical broadcast failure logging for performance
+        // Removed connection states debugging for performance
       }
     }
     
@@ -961,20 +1008,20 @@ const Network = {
           if (this.callbacks.logChainEvent) {
             this.callbacks.logChainEvent(`[Client] Sent player state to host (lobby filling)`);
           }
-          console.log(`[Client-Broadcast] ✓ Sent state to host: ${hostConnection.peer}`);
+          // Removed frequent client broadcast success logging for performance
         } catch (error) {
-          console.warn(`[Client-Broadcast] ✗ Failed to send player state to host:`, error);
+          // Removed frequent client broadcast failure logging for performance
           totalFailed++;
         }
       } else {
-        console.warn(`[Client-Broadcast] ✗ No open host connection (hostConn=${!!this.hostConn}, baseConn=${!!this.baseConn}, open=${hostConnection?.open})`);
+        // Removed frequent client connection status logging for performance
         totalFailed++;
       }
     }
     
     // Summary logging
     if (totalSent === 0 && (this.isBase ? Object.keys(this.lobbyPeerConnections || {}).length > 0 : true)) {
-      console.error(`[Network] BROADCAST FAILURE: Sent to ${totalSent} peers, ${totalFailed} failed. Role: ${this.isBase ? 'HOST' : 'CLIENT'}`);
+      // Removed frequent broadcast failure summary logging for performance
     }
   },
   
@@ -1079,17 +1126,6 @@ const Network = {
         this.callbacks.logChainEvent(`[Relay] Relayed terrain changes to ${relayCount} peers`);
       }
     }
-  },
-  
-  // Utility methods for networked player system
-  isConnected() {
-    return this.isInitialized && (this.paired || this.lobbyFull || Object.keys(this.lobbyPeerConnections).length > 0);
-  },
-  
-  hasConnections() {
-    return Object.keys(this.lobbyPeerConnections).length > 0 || 
-           (this.hostConn && this.hostConn.open) ||
-           Object.keys(this.basePeerConnections).length > 0;
   }
 };
 

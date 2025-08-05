@@ -45,8 +45,7 @@ export class UnifiedTerrain {
             wireframe: false,
             // Enhanced cartoon water surface with sparkles
             emissive: 0x003366, // Magical blue-green glow
-            emissiveIntensity: 0.18, // Higher intensity for sparkles
-            shininess: 140 // Very sparkly surface
+            emissiveIntensity: 0.18 // Higher intensity for sparkles
         });
         
         this.oceanSurface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
@@ -147,8 +146,7 @@ export class UnifiedTerrain {
             wireframe: false,
             // Enhanced cartoon underwater terrain with sparkles
             emissive: 0x001144, // Magical underwater glow
-            emissiveIntensity: 0.12, // Sparkly underwater effect
-            shininess: 80 // Moderate cartoon reflectivity
+            emissiveIntensity: 0.12 // Sparkly underwater effect
         });
         
         const mesh = new THREE.Mesh(geometry, material);

@@ -82,8 +82,6 @@ export class SpectatorPawn {
     handleMouseMovement(mouseX, mouseY) {
         if (!this.active) return;
 
-        console.log('[SpectatorPawn] Mouse movement:', mouseX, mouseY);
-
         // Update yaw and pitch based on mouse movement
         this.yaw -= mouseX * this.mouseSensitivity;
         this.pitch -= mouseY * this.mouseSensitivity;
@@ -96,8 +94,6 @@ export class SpectatorPawn {
         this.camera.rotation.y = this.yaw;
         this.camera.rotation.x = this.pitch;
         this.camera.rotation.z = 0;
-
-        console.log('[SpectatorPawn] Camera rotation set to:', this.camera.rotation.x, this.camera.rotation.y, this.camera.rotation.z);
     }
 
     activate() {

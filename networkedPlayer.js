@@ -7,7 +7,7 @@ export class NetworkedPlayer {
         this.scene = scene;
         this.isHost = isHost; // Track if this is the host/server player
         
-        console.log(`[NetworkedPlayer] Creating ${isHost ? 'HOST' : 'CLIENT'} ship for peer: ${peerId}`);
+        // Removed player creation logging for performance
         
         // Create the player group that will hold the ship
         this.pawn = new THREE.Group();
@@ -18,7 +18,7 @@ export class NetworkedPlayer {
         loader.load(
             './Ship1.glb',
             (gltf) => {
-                console.log(`[NetworkedPlayer] Ship1.glb loaded successfully for peer: ${peerId}`);
+                // Removed GLTF loading success logging for performance
                 const shipModel = gltf.scene;
                 
                 // Configure the ship
@@ -34,13 +34,13 @@ export class NetworkedPlayer {
                 // Initialize interpolation values to current state
                 this.initializeInterpolation();
                 
-                console.log(`[NetworkedPlayer] Ship added to scene for peer: ${peerId}`);
+                // Removed ship added logging for performance
             },
             (progress) => {
-                console.log(`[NetworkedPlayer] Loading Ship1.glb progress for ${peerId}:`, (progress.loaded / progress.total) * 100 + '%');
+                // Removed GLTF loading progress logging for performance
             },
             (error) => {
-                console.error(`[NetworkedPlayer] Error loading Ship1.glb for peer ${peerId}:`, error);
+                // Removed GLTF loading error logging for performance
                 
                 // Fallback: create a simple colored ship if GLTF fails
                 this.createFallbackShip(isHost);
@@ -81,7 +81,7 @@ export class NetworkedPlayer {
         this.isActive = true;
         this.hasReceivedFirstUpdate = false; // Track if we've received network data yet
         
-        console.log(`[NetworkedPlayer] Created networked ship for peer: ${peerId} at position:`, this.pawn.position);
+        // Removed networked ship creation logging for performance
     }
     
     // Apply visual styling based on player role
@@ -107,7 +107,7 @@ export class NetworkedPlayer {
             }
         });
         
-        console.log(`[NetworkedPlayer] Applied ${colorName} styling to ship: ${this.peerId}`);
+        // Removed ship styling logging for performance
     }
     
     // Initialize interpolation values to match current state
@@ -148,13 +148,13 @@ export class NetworkedPlayer {
         // Initialize interpolation values to current state
         this.initializeInterpolation();
         
-        console.log(`[NetworkedPlayer] Fallback ship created for peer: ${this.peerId}`);
+        // Removed fallback ship creation logging for performance
     }
     
     // Update the player's state from network data
     updateFromNetwork(state) {
         if (!state || !state.position) {
-            console.warn(`[NetworkedPlayer] Invalid state received for ${this.peerId}:`, state);
+            // Removed invalid state logging for performance
             return;
         }
         
@@ -198,7 +198,7 @@ export class NetworkedPlayer {
                 this.pawn.shipModel.position.copy(this.interpolation.shipModelPosition);
             }
             
-            console.log(`[NetworkedPlayer] First update - snapped ${this.isHost ? 'HOST' : 'CLIENT'} ship ${this.peerId} to position:`, this.pawn.position);
+            // Removed first update logging for performance
             
         } else {
             // For subsequent updates, set new targets for smooth interpolation
@@ -239,7 +239,7 @@ export class NetworkedPlayer {
         const NETWORK_TIMEOUT = 5000; // 5 seconds
         
         if (timeSinceLastUpdate > NETWORK_TIMEOUT && this.isActive) {
-            console.warn(`[NetworkedPlayer] No network updates for ${this.peerId} in ${timeSinceLastUpdate}ms - marking as inactive`);
+            // Removed network timeout logging for performance
             this.isActive = false;
             // Could add visual indicator here (fade out, different color, etc.)
         }
@@ -294,7 +294,7 @@ export class NetworkedPlayer {
     destroy() {
         if (this.pawn && this.scene) {
             this.scene.remove(this.pawn);
-            console.log(`[NetworkedPlayer] Removed networked ship: ${this.peerId}`);
+            // Removed networked ship removal logging for performance
         }
     }
     
@@ -312,7 +312,7 @@ export class NetworkedPlayerManager {
         this.isMultiplayerMode = false;
         this.localPeerId = null;
         
-        console.log('[NetworkedPlayerManager] Initialized');
+        // Removed NetworkedPlayerManager initialization logging for performance
         
         // Detect if we're in multiplayer mode
         this.detectMultiplayerMode();
@@ -324,10 +324,10 @@ export class NetworkedPlayerManager {
         if (window.Network && window.Network.isInitialized) {
             this.isMultiplayerMode = true;
             this.localPeerId = window.Network.myPeerId;
-            console.log(`[NetworkedPlayerManager] Multiplayer mode detected - Local peer: ${this.localPeerId}`);
+            // Removed multiplayer mode detection logging for performance
         } else {
             this.isMultiplayerMode = false;
-            console.log('[NetworkedPlayerManager] Single player mode detected');
+            // Removed single player mode detection logging for performance
         }
     }
     
@@ -340,25 +340,25 @@ export class NetworkedPlayerManager {
     addPlayer(peerId, isHost = false) {
         // Don't create networked players in single player mode
         if (!this.shouldCreateNetworkedPlayers()) {
-            console.log(`[NetworkedPlayerManager] Skipping player creation in single player mode: ${peerId}`);
+            // Removed single player mode skip logging for performance
             return;
         }
         
         // Don't create a networked player for ourselves
         if (peerId === this.localPeerId) {
-            console.log(`[NetworkedPlayerManager] Skipping self-player creation: ${peerId}`);
+            // Removed self-player creation skip logging for performance
             return;
         }
         
         if (this.networkedPlayers.has(peerId)) {
-            console.warn(`[NetworkedPlayerManager] Player ${peerId} already exists`);
+            // Removed player already exists warning for performance
             return;
         }
         
         const networkedPlayer = new NetworkedPlayer(peerId, this.scene, isHost);
         this.networkedPlayers.set(peerId, networkedPlayer);
         
-        console.log(`[NetworkedPlayerManager] Added ${isHost ? 'HOST' : 'CLIENT'} ship: ${peerId}`);
+        // Removed player addition logging for performance
     }
     
     // Remove a networked player
@@ -367,7 +367,7 @@ export class NetworkedPlayerManager {
         if (networkedPlayer) {
             networkedPlayer.destroy();
             this.networkedPlayers.delete(peerId);
-            console.log(`[NetworkedPlayerManager] Removed ship: ${peerId}`);
+            // Removed ship removal logging for performance
         }
     }
     
@@ -382,7 +382,7 @@ export class NetworkedPlayerManager {
         if (networkedPlayer) {
             networkedPlayer.updateFromNetwork(state);
         } else {
-            console.warn(`[NetworkedPlayerManager] Received update for unknown ship: ${peerId}`);
+            // Removed unknown ship warning for performance
             // Auto-create player if they don't exist (they might have joined mid-game)
             const isHost = window.Network && window.Network.isBase && peerId !== window.Network.myPeerId;
             this.addPlayer(peerId, isHost);
@@ -420,7 +420,7 @@ export class NetworkedPlayerManager {
             
             for (const [peerId, networkedPlayer] of this.networkedPlayers) {
                 if (!networkedPlayer.isPlayerActive()) {
-                    console.log(`[NetworkedPlayerManager] Cleaning up inactive player: ${peerId}`);
+                    // Removed inactive player cleanup logging for performance
                     this.removePlayer(peerId);
                 }
             }
@@ -473,6 +473,6 @@ export class NetworkedPlayerManager {
             networkedPlayer.destroy();
         }
         this.networkedPlayers.clear();
-        console.log('[NetworkedPlayerManager] Cleared all networked ships');
+        // Removed networked ships clearing logging for performance
     }
 }

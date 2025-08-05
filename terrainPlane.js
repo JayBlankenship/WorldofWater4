@@ -463,8 +463,7 @@ export class TerrainPlane {
             wireframe: false, // Solid surface
             // Enhanced cartoon water appearance with sparkles
             emissive: 0x002266, // Stronger blue glow for magical effect
-            emissiveIntensity: 0.25, // Higher intensity for cartoon sparkle
-            shininess: 150, // Very reflective for sparkly cartoon water
+            emissiveIntensity: 0.25 // Higher intensity for cartoon sparkle
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.geometry = geometry;

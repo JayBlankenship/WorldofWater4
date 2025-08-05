@@ -77,18 +77,18 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
     
     // For networked players, immediately create a simple ship without trying to load GLTF
     if (color === 0xFF0000) { // If this is a networked player (red color)
-        console.log('Creating simple ship for networked player');
-        console.log('Color check passed:', color, '=== 0xFF0000:', color === 0xFF0000);
+        // Removed logging for performance
+        // Removed logging for performance
         
         // Skip creating the simple red box - networked players will use the GLTF model instead
-        console.log('Skipping simple ship creation for networked player - will use GLTF model');
+        // Removed logging for performance
         
         // Try to load Ship1.glb for networked players too
         const loader = new GLTFLoader();
         loader.load(
         './Ship1.glb',
         (gltf) => {
-            console.log('Ship1.glb loaded successfully for networked player');
+            // Removed logging for performance
             const shipModel = gltf.scene;
             
             // Configure and add the GLTF ship
@@ -112,10 +112,10 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
             
             playerGroup.add(shipModel);
             playerGroup.shipModel = shipModel;
-            console.log('Ship1.glb added to networked player group');
+            // Removed logging for performance
         },
         (progress) => {
-            console.log('Loading Ship1.glb progress for networked player:', (progress.loaded / progress.total) * 100 + '%');
+            // Removed logging for performance
         },
         (error) => {
             console.error('Error loading Ship1.glb for networked player:', error);
@@ -130,17 +130,17 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
             simpleShip.position.y = 0;
             playerGroup.add(simpleShip);
             playerGroup.shipModel = simpleShip;
-            console.log('Gray fallback ship created for networked player');
+            // Removed logging for performance
         }
         );
     } else {
-        console.log('Not a networked player, using GLTF loader. Color:', color);
+        // Removed logging for performance
         // Try to load Ship1.glb for local and AI players
         const loader = new GLTFLoader();
         loader.load(
         './Ship1.glb',
         (gltf) => {
-            console.log('Ship1.glb loaded successfully');
+            // Removed logging for performance
             const shipModel = gltf.scene;
             
             // Configure and add the GLTF ship
@@ -170,14 +170,14 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
             playerGroup.add(shipModel);
             playerGroup.shipModel = shipModel; // Store reference for animations
             
-            console.log('Ship1.glb added to player group');
+            // Removed logging for performance
         },
         (progress) => {
-            console.log('Loading Ship1.glb progress:', (progress.loaded / progress.total) * 100 + '%');
+            // Removed logging for performance
         },
         (error) => {
             console.error('Error loading Ship1.glb:', error);
-            console.log('Using procedural ship geometry fallback');
+            // Removed logging for performance
             
             // Create the procedural ship hull
             const shipGeometry = createFallbackShipGeometry();
@@ -289,22 +289,22 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
             const isAutoSailing = !moveState.left && !moveState.right && !moveState.backward && sailSpeed > 0;
             
             if (isAutoSailing) {
-                // Removed frequent auto-sailing logging for performance
+                // Removed logging for performance
             } else {
-                // Removed frequent manual control logging for performance
+                // Removed logging for performance
             }
             
             // Use the ship's forward vector that automatically rotates with the ship
             const worldForward = this.forwardVector.clone().applyQuaternion(this.quaternion);
             worldForward.normalize();
 
-            // Removed frequent forward direction logging for performance
+            // Removed logging for performance
 
             // Ship movement - automatic forward movement based on sail mode
             if (sailSpeed > 0) {
                 const movement = worldForward.clone().multiplyScalar(sailSpeed * deltaTime);
                 this.position.add(movement);
-                // Removed frequent movement logging for performance
+                // Removed logging for performance
             }
 
             // New simple turning mechanics with better rotation speed
@@ -312,16 +312,19 @@ export function createShipPawn(isAI = false, color = null, showStar = false) {
             if (moveState.left) {
                 // Turn left with consistent speed
                 this.rotation.y += turnSpeed * deltaTime;
+                // Removed logging for performance
             }
             if (moveState.right) {
                 // Turn right with consistent speed
                 this.rotation.y -= turnSpeed * deltaTime;
+                // Removed logging for performance
             }
 
             // Manual reverse with S key (only when pressed in normal mode)
             if (moveState.backward) {
                 const reverseMovement = worldForward.clone().multiplyScalar(-sailSpeed * 0.5 * deltaTime);
                 this.position.add(reverseMovement);
+                // Removed logging for performance
             }
 
         }
